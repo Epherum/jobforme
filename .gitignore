@@ -14,7 +14,8 @@ dist/
 build/
 
 # Local data
-/data/
+/data/*
+!data/config.env.example
 /state/
 /debug/
 *.sqlite3

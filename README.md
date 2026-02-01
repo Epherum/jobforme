@@ -1,23 +1,15 @@
 # job-scraper
 
-Minimal job scraper that runs every 15 minutes and stores new jobs in SQLite.
+Job scraper + workflow helper.
+
+What it does:
+- Scrapes multiple job boards into a local SQLite DB (`data/jobs.sqlite3`).
+- Exports the full DB to `data/all_jobs.csv` and syncs it into the Google Sheet tab **All jobs** (for analytics).
+- Appends **relevant** jobs into a lightweight daily inbox tab **Jobs_Today**.
+- You review Jobs_Today, then run a command that transfers the rows into **Jobs** (your editable workflow tab with dropdown + notes).
+- Sends **one Pushover notification** per full cycle when new relevant jobs were found.
 
 ## Setup
-
-### Jobs tab workflow (Applied toggle + timestamp)
-
-The scraper appends **relevant jobs** into the `Jobs` tab, but you control the application workflow.
-
-We use:
-- `decision` dropdown (NEW / SAVED / APPLIED / SKIPPED_NOT_A_FIT / REJECTED / ARCHIVED)
-- `decision_at` timestamp auto-filled when you set `decision=APPLIED`
-
-To enable dropdown + timestamp:
-1) Open your Google Sheet
-2) Extensions → Apps Script
-3) Create a new script and paste: `google_apps_script/jobs_onedit.gs`
-4) Run `setupJobsSheet()` once (authorize)
-
 
 ```bash
 cd job-scraper
@@ -28,50 +20,79 @@ pip install -e .
 python -m playwright install chromium
 ```
 
-## Tanitjobs
-Tanitjobs is protected by Cloudflare. This scraper uses a **persistent Playwright profile** so you can solve the challenge once in a headed browser, then reuse the cookies.
+### Config
 
-### Recommended: Windows + your real Edge profile
-Cloudflare often blocks automated profiles. The most reliable approach is to run Playwright with the installed **Microsoft Edge** and point it at your **real Edge user profile** directory, so it reuses the same verified session.
-
-### 1) First run (headed) to pass Cloudflare
+Create `data/config.env` (copy from `data/config.env.example`):
 
 ```bash
-python -m jobscraper.run --source tanitjobs \
-  --tanitjobs-url "<your search url>" \
-  --browser-channel msedge \
-  --user-data-dir "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data" \
-  --headed --once
+cp data/config.env.example data/config.env
 ```
 
-A browser window opens. Complete the Cloudflare check and make sure you can see the job results page. The script waits ~2 minutes before scraping. Cookies are saved under `./state/`.
+Fill:
+- `SHEET_ID`
+- `SHEET_ACCOUNT`
+- `CDP_URL` (Chrome/Edge launched with `--remote-debugging-port=9223`)
 
-### 2) Normal run
+### Pushover
 
-```bash
-python -m jobscraper.run --source tanitjobs \
-  --tanitjobs-url "<your search url>" \
-  --browser-channel msedge \
-  --user-data-dir "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data" \
-  --once
-```
-
-## Data
-- SQLite DB: `./data/jobs.sqlite3`
-- Debug HTML snapshots: `./debug/`
-
-## Alerts (ntfy)
-
-1) Install the ntfy app on your phone and subscribe to a topic.
-2) Store your topic locally (not committed):
+Create `data/pushover.env`:
 
 ```bash
 mkdir -p data
-echo "wassim-job-alerts-7f3c9a2b" > data/ntfy_topic.txt
+cat > data/pushover.env <<'EOF'
+PUSHOVER_USER_KEY=...
+PUSHOVER_APP_TOKEN=...
+EOF
 ```
 
-- Tier-1 sources: run with `--notify` to push an alert when `relevant_new > 0`.
-- Tier-2 watchers (tanitjobs/aneti): they push when they detect **new relevant** jobs on the first page.
+### Google Sheet tabs
 
-## Next
-- Add proper CLI wrapper (one command to run all + watch loop)
+Create these tabs:
+- `Jobs_Today` (scraper output, append-only)
+- `Jobs` (your workflow tab: decision dropdown + notes)
+- `All jobs` (full export for analytics)
+
+Recommended `Jobs` schema (A:I):
+- date_added, source, title, company, location, url, labels, decision, notes
+
+Set a **dropdown** on `Jobs!H:H` with values:
+- NEW
+- SAVED
+- APPLIED
+- SKIPPED_NOT_A_FIT
+- REJECTED
+- ARCHIVED
+
+(We do not use Apps Script. The view/tab limitations are avoided by the Jobs_Today transfer flow.)
+
+## Commands
+
+### Smoke test
+
+Checks: SQLite, CDP, Pushover config, Sheets access.
+
+```bash
+python -m jobscraper smoke
+```
+
+### Dashboard (full cycle loop)
+
+Runs all sources every `INTERVAL_MIN` minutes.
+- Appends new relevant rows into `Jobs_Today`
+- Syncs full DB into `All jobs`
+- Sends 1 Pushover notification if anything new relevant was found
+
+```bash
+python -m jobscraper dashboard
+```
+
+### Transfer today inbox into workflow
+
+```bash
+python -m jobscraper transfer-today
+```
+
+## Data
+- SQLite DB: `data/jobs.sqlite3`
+- Full export CSV: `data/all_jobs.csv`
+- Run log: `data/run_log.csv`

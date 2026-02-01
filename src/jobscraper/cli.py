@@ -139,22 +139,30 @@ def _build_table(tasks: List[Task], now_ts: float) -> Table:
 
 @app.command()
 def dashboard(
-    sheet_id: str = typer.Option("", help="Google Sheet ID."),
-    jobs_today_tab: str = typer.Option("Jobs_Today", help="Tab where scraper appends new relevant jobs."),
-    all_jobs_tab: str = typer.Option("All jobs", help="Tab name for full DB export."),
-    interval_min: int = typer.Option(20, help="Full cycle interval minutes."),
+    sheet_id: str = typer.Option("", help="Google Sheet ID (or set SHEET_ID in data/config.env)."),
+    jobs_today_tab: str = typer.Option("", help="Tab where scraper appends new relevant jobs."),
+    all_jobs_tab: str = typer.Option("", help="Tab name for full DB export."),
+    interval_min: int = typer.Option(0, help="Full cycle interval minutes."),
     log_csv: Path = typer.Option(DEFAULT_LOG, help="CSV run log path."),
 ) -> None:
     """Live dashboard loop. Runs a full cycle every N minutes and sends ONE notification."""
 
+    from .config import load_config
+
+    cfg = load_config()
+    sheet_id = sheet_id or cfg.sheet_id
+    jobs_today_tab = jobs_today_tab or cfg.jobs_today_tab
+    all_jobs_tab = all_jobs_tab or cfg.all_jobs_tab
+    interval_min = interval_min or cfg.interval_min
+
     if not sheet_id:
-        console.print("sheet_id is required (use your Jobs sheet id)")
+        console.print("sheet_id is required (pass --sheet-id or set SHEET_ID in data/config.env)")
         raise typer.Exit(2)
 
     # One unified cycle. Tiers are just implementation difficulty.
     sources = ["keejob", "welcometothejungle", "weworkremotely", "remoteok", "remotive", "tanitjobs", "aneti"]
 
-    cdp = os.getenv("CDP_URL", "http://172.25.192.1:9223")
+    cdp = cfg.cdp_url
 
     tasks: List[Task] = [
         Task(
@@ -189,8 +197,11 @@ def dashboard(
             for t in tasks:
                 start = time.time()
                 try:
-                    # For CDP-dependent sources, pass CDP_URL via env.
-                    code, out = _run(t.cmd, timeout_s=900)
+                    # Pass CDP_URL explicitly so subcommands always see the right value.
+                    env = {**os.environ, "CDP_URL": cdp}
+                    proc = subprocess.run(t.cmd, capture_output=True, text=True, timeout=900, env=env)
+                    code = proc.returncode
+                    out = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
                 except subprocess.TimeoutExpired:
                     code, out = 124, "timeout"
 
@@ -253,15 +264,44 @@ def dashboard(
 
 
 @app.command()
+def smoke() -> None:
+    """Quick dependency check: SQLite, CDP, Pushover config, Sheets access."""
+    from .config import load_config
+    from .smoke import smoke_checks
+
+    cfg = load_config()
+    results = smoke_checks(cfg)
+
+    bad = 0
+    for r in results:
+        status = "OK" if r.ok else "FAIL"
+        console.print(f"{status} {r.name}: {r.detail}")
+        if not r.ok:
+            bad += 1
+
+    raise typer.Exit(1 if bad else 0)
+
+
+@app.command()
 def transfer_today(
-    sheet_id: str = typer.Argument(...),
-    from_tab: str = typer.Option("Jobs_Today", help="Source tab (scraper output)."),
-    to_tab: str = typer.Option("Jobs", help="Destination tab (your workflow + dropdown)."),
+    sheet_id: str = typer.Argument("", help="Google Sheet ID (or set SHEET_ID in data/config.env)."),
+    from_tab: str = typer.Option("", help="Source tab (scraper output)."),
+    to_tab: str = typer.Option("", help="Destination tab (your workflow + dropdown)."),
 ) -> None:
     """Move all rows from Jobs_Today into Jobs, then clear Jobs_Today."""
+    from .config import load_config
     from .transfer_today import TransferConfig, transfer_today
 
-    n = transfer_today(TransferConfig(sheet_id=sheet_id, from_tab=from_tab, to_tab=to_tab))
+    cfg = load_config()
+    sheet_id = sheet_id or cfg.sheet_id
+    from_tab = from_tab or cfg.jobs_today_tab
+    to_tab = to_tab or cfg.jobs_tab
+
+    if not sheet_id:
+        console.print("sheet_id is required (pass as arg or set SHEET_ID in data/config.env)")
+        raise typer.Exit(2)
+
+    n = transfer_today(TransferConfig(sheet_id=sheet_id, from_tab=from_tab, to_tab=to_tab, account=cfg.sheet_account))
     console.print(f"moved_rows={n}")
 
 
