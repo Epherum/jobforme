@@ -13,6 +13,7 @@ from .sources.remotive import RemotiveConfig, scrape_remotive
 from .sources.aneti import AnetiConfig, scrape_aneti
 from .filtering import is_relevant
 from .sheets_sync import SheetsConfig, append_jobs, ensure_jobs_header
+from .alerts.ntfy import send_many
 
 
 def main() -> int:
@@ -40,6 +41,7 @@ def main() -> int:
         help="Persistent browser profile directory. Use with care; on Windows Edge it's typically %%LOCALAPPDATA%%\\Microsoft\\Edge\\User Data. Close Edge first.",
     )
     p.add_argument("--sheet-id", default=None, help="Google Sheet ID to append new relevant jobs to")
+    p.add_argument("--notify", action="store_true", help="Send ntfy notification when relevant_new > 0")
     p.add_argument("--sheet-tab", default="Jobs", help="Sheet tab name")
     p.add_argument("--sheet-account", default="wassimfekih2@gmail.com", help="gog account email")
     args = p.parse_args()
@@ -78,6 +80,10 @@ def main() -> int:
             ensure_jobs_header(scfg)
             append_jobs(scfg, relevant_new, date_label=date_label)
 
+        if args.notify and relevant_new:
+            lines = [f"{j.title} | {j.url}" for j in relevant_new]
+            send_many(title=f"Keejob: {len(relevant_new)} new relevant", lines=lines, tags=["briefcase"], priority=4)
+
     if args.source == "welcometothejungle":
         cfg = WTTJConfig(days=1, max_detail_pages=40, max_per_company=5)
         jobs, date_label = scrape_wttj(cfg=cfg)
@@ -93,6 +99,10 @@ def main() -> int:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
             append_jobs(scfg, relevant_new, date_label=date_label)
+
+        if args.notify and relevant_new:
+            lines = [f"{j.title} | {j.url}" for j in relevant_new]
+            send_many(title=f"welcometothejungle: {len(relevant_new)} new relevant", lines=lines, tags=["briefcase"], priority=4)
 
     if args.source == "weworkremotely":
         cfg = WWRConfig()
@@ -110,6 +120,10 @@ def main() -> int:
             ensure_jobs_header(scfg)
             append_jobs(scfg, relevant_new, date_label=date_label)
 
+        if args.notify and relevant_new:
+            lines = [f"{j.title} | {j.url}" for j in relevant_new]
+            send_many(title=f"weworkremotely: {len(relevant_new)} new relevant", lines=lines, tags=["briefcase"], priority=4)
+
     if args.source == "remoteok":
         cfg = RemoteOKConfig()
         jobs, date_label = scrape_remoteok(cfg=cfg)
@@ -125,6 +139,10 @@ def main() -> int:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
             append_jobs(scfg, relevant_new, date_label=date_label)
+
+        if args.notify and relevant_new:
+            lines = [f"{j.title} | {j.url}" for j in relevant_new]
+            send_many(title=f"remoteok: {len(relevant_new)} new relevant", lines=lines, tags=["briefcase"], priority=4)
 
     if args.source == "remotive":
         cfg = RemotiveConfig()
@@ -142,6 +160,10 @@ def main() -> int:
             ensure_jobs_header(scfg)
             append_jobs(scfg, relevant_new, date_label=date_label)
 
+        if args.notify and relevant_new:
+            lines = [f"{j.title} | {j.url}" for j in relevant_new]
+            send_many(title=f"remotive: {len(relevant_new)} new relevant", lines=lines, tags=["briefcase"], priority=4)
+
     if args.source == "aneti":
         # CDP-only: ANETI blocks our server IP, so we use your Windows Chrome session.
         cfg = AnetiConfig(cdp_url="http://172.25.192.1:9223", max_offers=25)
@@ -158,6 +180,10 @@ def main() -> int:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
             append_jobs(scfg, relevant_new, date_label=date_label)
+
+        if args.notify and relevant_new:
+            lines = [f"{j.title} | {j.url}" for j in relevant_new]
+            send_many(title=f"aneti: {len(relevant_new)} new relevant", lines=lines, tags=["briefcase"], priority=4)
 
     db.close()
     return 0

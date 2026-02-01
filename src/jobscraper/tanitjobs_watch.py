@@ -10,6 +10,7 @@ from playwright.sync_api import TimeoutError as PWTimeoutError
 from playwright.sync_api import sync_playwright
 
 from jobscraper.filtering import is_relevant
+from jobscraper.alerts.ntfy import send_many
 
 
 DEFAULT_URL = "https://www.tanitjobs.com/"
@@ -31,7 +32,7 @@ def fetch_first_page_jobs(
     with sync_playwright() as p:
         browser = None
         if cdp_url:
-            browser = p.chromium.connect_over_cdp(cdp_url)
+            browser = p.chromium.connect_over_cdp(cdp_url, timeout=timeout_ms)
             ctx = browser.contexts[0] if browser.contexts else browser.new_context()
             page = ctx.new_page()
         elif user_data_dir:
@@ -177,6 +178,14 @@ def main() -> int:
         print(f"tanitjobs_watch: NEW relevant={len(new_relevant)} (new_total={len(new_items)})")
         for jid, title in new_relevant[:10]:
             print(f"NEW: {title} | https://www.tanitjobs.com/job/{jid}/")
+
+        lines = [f"{title} | https://www.tanitjobs.com/job/{jid}/" for jid, title in new_relevant]
+        send_many(
+            title=f"Tanitjobs: {len(new_relevant)} new relevant",
+            lines=lines,
+            tags=["briefcase"],
+            priority=4,
+        )
         return 1
 
     print(f"tanitjobs_watch: no new relevant (new_total={len(new_items)})")

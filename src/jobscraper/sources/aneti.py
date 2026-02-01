@@ -97,7 +97,7 @@ def scrape_aneti(cfg: AnetiConfig) -> Tuple[List[Job], str]:
     jobs: List[Job] = []
 
     with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp(cfg.cdp_url)
+        browser = p.chromium.connect_over_cdp(cfg.cdp_url, timeout=cfg.timeout_ms)
         ctx = browser.contexts[0] if browser.contexts else browser.new_context()
 
         page = ctx.new_page()

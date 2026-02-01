@@ -6,6 +6,7 @@ from pathlib import Path
 
 from jobscraper.filtering import is_relevant
 from jobscraper.sources.aneti import AnetiConfig, scrape_aneti
+from jobscraper.alerts.ntfy import send_many
 
 
 def load_state(path: Path) -> dict:
@@ -56,6 +57,15 @@ def main() -> int:
         print(f"aneti_watch: NEW relevant={len(new_relevant)} (new_total={len(new_jobs)})")
         for j in new_relevant[:10]:
             print(f"NEW: {j.title} | {j.url}")
+
+        # Push to ntfy (all links)
+        lines = [f"{j.title} | {j.url}" for j in new_relevant]
+        send_many(
+            title=f"ANETI: {len(new_relevant)} new relevant",
+            lines=lines,
+            tags=["briefcase"],
+            priority=4,
+        )
         return 1
 
     print(f"aneti_watch: no new relevant (new_total={len(new_jobs)})")
