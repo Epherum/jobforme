@@ -80,13 +80,34 @@ class JobDB:
                 )
                 new_jobs.append(job)
             except sqlite3.IntegrityError:
+                # Update last_seen_at always. Also improve metadata if we previously had placeholders.
+                cur.execute(
+                    "SELECT title, posted_at FROM jobs WHERE source = ? AND external_id = ?",
+                    (job.source, job.external_id),
+                )
+                row = cur.fetchone()
+                existing_title = (row[0] if row else "") or ""
+                existing_posted_at = row[1] if row else None
+
+                new_title = job.title
+                # If we accidentally stored garbage titles, upgrade them.
+                bad_title = (existing_title.strip() in {"", "(unknown)"}) or ("annonces trouv" in existing_title.lower())
+
+                set_title = new_title if (bad_title and new_title and new_title != "(unknown)") else existing_title
+                set_posted_at = posted_at if (existing_posted_at is None and posted_at is not None) else existing_posted_at
+
                 cur.execute(
                     """
                     UPDATE jobs
-                    SET last_seen_at = ?
+                    SET last_seen_at = ?,
+                        title = ?,
+                        company = CASE WHEN company = '' THEN ? ELSE company END,
+                        location = CASE WHEN location = '' THEN ? ELSE location END,
+                        url = ?,
+                        posted_at = ?
                     WHERE source = ? AND external_id = ?
                     """,
-                    (now, job.source, job.external_id),
+                    (now, set_title, job.company, job.location, job.url, set_posted_at, job.source, job.external_id),
                 )
 
         self.conn.commit()

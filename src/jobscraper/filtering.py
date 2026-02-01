@@ -15,28 +15,108 @@ class KeywordRule:
 # These rules are used for local filtering/labeling only.
 BROAD_RULES: List[KeywordRule] = [
     # TECH (broad)
-    KeywordRule(label="TECH", keywords=[
-        "full stack", "full-stack", "fullstack", "développeur", "developer", "ingénieur", "engineer",
-        "frontend", "front-end", "backend", "back-end", "software", "web", "it", "informatique",
-        "react", "next", "node", "javascript", "typescript", "python", "sql",
-        "devops", "docker", "postgres", "postgresql", "prisma", "supabase",
-        # ERP / technico-functional terms
-        "technico-fonctionnel", "techno-fonctionnel", "sage",
-    ]),
+    KeywordRule(
+        label="TECH",
+        keywords=[
+            "full stack",
+            "full-stack",
+            "fullstack",
+            "développeur",
+            "developer",
+            "ingénieur",
+            "engineer",
+            "frontend",
+            "front-end",
+            "backend",
+            "back-end",
+            "software",
+            "web",
+            "it",
+            "informatique",
+            # Common Tunisia/FR IT titles
+            "chef de projet",
+            "project manager",
+            "analyste",
+            "analyste fonctionnel",
+            "fonctionnel",
+            "consultant",
+            "data center",
+            "datacenter",
+            "monétique",
+            "react",
+            "next",
+            "node",
+            "javascript",
+            "typescript",
+            "python",
+            "sql",
+            "devops",
+            "docker",
+            "postgres",
+            "postgresql",
+            "prisma",
+            "supabase",
+            # ERP / technico-functional terms
+            "technico-fonctionnel",
+            "techno-fonctionnel",
+            "sage",
+        ],
+    ),
 
     # AI (broad, with special handling for short token IA)
-    KeywordRule(label="AI", keywords=[
-        "machine learning", "deep learning", "intelligence artificielle", "computer vision", "vision", "yolo", "rag", "llm",
-    ]),
+    KeywordRule(
+        label="AI",
+        keywords=[
+            "machine learning",
+            "deep learning",
+            "intelligence artificielle",
+            "computer vision",
+            "vision",
+            "yolo",
+            "rag",
+            "llm",
+        ],
+    ),
 
     # SALES (broad)
-    KeywordRule(label="SALES", keywords=[
-        "sales", "commercial", "vente", "business development", "développement commercial",
-        "account executive", "account manager", "chargé d'affaires", "chargé daffaires", "ingénieur commercial", "technico-commercial",
-        "chef des ventes",
-        # Tunisia/common variants
-        "télévente", "télévendeur", "télévendeurs", "vendeur", "conseiller commercial", "chargé clientèle",
-    ]),
+    KeywordRule(
+        label="SALES",
+        keywords=[
+            "sales",
+            "commercial",
+            "vente",
+            "business development",
+            "développement commercial",
+            "account executive",
+            "account manager",
+            "chargé d'affaires",
+            "chargé daffaires",
+            "ingénieur commercial",
+            "technico-commercial",
+            "chef des ventes",
+            # Tunisia/common variants
+            "télévente",
+            "télévendeur",
+            "télévendeurs",
+            "téléconseiller",
+            "téléconseillère",
+            "téléopérateur",
+            "téléopérateurs",
+            "centre d'appel",
+            "centre d’appels",
+            "call center",
+            "centre de contact",
+            "vendeur",
+            "vendeuse",
+            "conseiller commercial",
+            "chargé clientèle",
+            "chargé de clientèle",
+            "chargée de clientèle",
+            "prise de rdv",
+            "prise de rendez",
+            "rdv",
+        ],
+    ),
 ]
 
 
