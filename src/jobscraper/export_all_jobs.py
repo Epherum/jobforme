@@ -26,7 +26,8 @@ COLUMNS = [
 ]
 
 
-def export_all_jobs_csv(cfg: ExportConfig) -> Path:
+def export_all_jobs_csv(cfg: ExportConfig | None = None) -> Path:
+    cfg = cfg or ExportConfig()
     cfg.out_csv.parent.mkdir(parents=True, exist_ok=True)
 
     con = sqlite3.connect(str(cfg.db_path))
