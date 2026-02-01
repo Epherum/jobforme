@@ -24,14 +24,26 @@ def _run_gog(args: List[str]) -> None:
 
 def ensure_jobs_header(cfg: SheetsConfig) -> None:
     # Dedicated Jobs tab. Header always at row 1.
-    values = [["source", "labels", "title", "company", "location", "date", "url"]]
+    # Workflow columns are on the right so you can track applications.
+    values = [[
+        "date_added",
+        "source",
+        "title",
+        "company",
+        "location",
+        "url",
+        "labels",
+        "decision",
+        "decision_at",
+        "notes",
+    ]]
     _run_gog(
         [
             "gog",
             "sheets",
             "update",
             cfg.sheet_id,
-            f"{cfg.tab}!A1:G1",
+            f"{cfg.tab}!A1:J1",
             "--account",
             cfg.account,
             "--values-json",
@@ -49,7 +61,8 @@ def append_jobs(cfg: SheetsConfig, jobs: Sequence[Job], date_label: str) -> None
     rows = []
     for j in jobs:
         labels = ",".join(match_labels(j.title))
-        rows.append([j.source, labels, j.title, j.company, j.location, date_label, j.url])
+        # decision/decision_at/notes intentionally left blank; managed in Sheets.
+        rows.append([date_label, j.source, j.title, j.company, j.location, j.url, labels, "", "", ""])
 
     _run_gog(
         [
@@ -57,7 +70,7 @@ def append_jobs(cfg: SheetsConfig, jobs: Sequence[Job], date_label: str) -> None
             "sheets",
             "append",
             cfg.sheet_id,
-            f"{cfg.tab}!A:G",
+            f"{cfg.tab}!A:J",
             "--account",
             cfg.account,
             "--values-json",

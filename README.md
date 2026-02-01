@@ -4,6 +4,21 @@ Minimal job scraper that runs every 15 minutes and stores new jobs in SQLite.
 
 ## Setup
 
+### Jobs tab workflow (Applied toggle + timestamp)
+
+The scraper appends **relevant jobs** into the `Jobs` tab, but you control the application workflow.
+
+We use:
+- `decision` dropdown (NEW / SAVED / APPLIED / SKIPPED_NOT_A_FIT / REJECTED / ARCHIVED)
+- `decision_at` timestamp auto-filled when you set `decision=APPLIED`
+
+To enable dropdown + timestamp:
+1) Open your Google Sheet
+2) Extensions → Apps Script
+3) Create a new script and paste: `google_apps_script/jobs_onedit.gs`
+4) Run `setupJobsSheet()` once (authorize)
+
+
 ```bash
 cd job-scraper
 python3 -m venv .venv
