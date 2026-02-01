@@ -139,100 +139,114 @@ def _build_table(tasks: List[Task], now_ts: float) -> Table:
 
 @app.command()
 def dashboard(
-    sheet_id: str = typer.Option("", help="Google Sheet ID for Tier-1 runs (append)."),
-    interval_tier1_min: int = typer.Option(20, help="Tier-1 scrape interval minutes."),
-    interval_tier2_min: int = typer.Option(15, help="Tier-2 watch interval minutes."),
-    log_csv: Path = typer.Option(DEFAULT_LOG, help="CSV log path."),
+    sheet_id: str = typer.Option("", help="Google Sheet ID for Jobs tab (relevant-only)."),
+    all_jobs_tab: str = typer.Option("All jobs", help="Tab name for full DB export."),
+    interval_min: int = typer.Option(20, help="Full cycle interval minutes."),
+    log_csv: Path = typer.Option(DEFAULT_LOG, help="CSV run log path."),
 ) -> None:
-    """Live dashboard loop. Runs Tier-1 scrapers and Tier-2 watchers on schedule."""
+    """Live dashboard loop. Runs a full cycle every N minutes and sends ONE notification."""
 
     if not sheet_id:
         console.print("sheet_id is required (use your Jobs sheet id)")
         raise typer.Exit(2)
 
-    tier1 = ["keejob", "welcometothejungle", "weworkremotely", "remoteok", "remotive"]
-    tier2 = ["tanitjobs", "aneti"]
+    # One unified cycle. Tiers are just implementation difficulty.
+    sources = ["keejob", "welcometothejungle", "weworkremotely", "remoteok", "remotive", "tanitjobs", "aneti"]
 
-    # Build commands. We call modules so the CLI stays thin.
-    tasks: List[Task] = []
-
-    for s in tier1:
-        tasks.append(
-            Task(
-                name=s,
-                kind="run",
-                interval_s=interval_tier1_min * 60,
-                cmd=[
-                    sys.executable,
-                    "-m",
-                    "jobscraper.run",
-                    "--source",
-                    s,
-                    "--once",
-                    "--notify",
-                    "--sheet-id",
-                    sheet_id,
-                ],
-            )
-        )
-
-    # Tier-2 watchers use CDP and ntfy directly.
-    # CDP URL is currently hardcoded in run.py for ANETI run-mode; watchers take --cdp.
     cdp = os.getenv("CDP_URL", "http://172.25.192.1:9223")
-    tasks.append(
+
+    tasks: List[Task] = [
         Task(
-            name="tanitjobs",
-            kind="watch",
-            interval_s=interval_tier2_min * 60,
-            cmd=[sys.executable, "-m", "jobscraper.tanitjobs_watch", "--cdp", cdp],
+            name=s,
+            kind="run",
+            interval_s=interval_min * 60,
+            cmd=[
+                sys.executable,
+                "-m",
+                "jobscraper.run",
+                "--source",
+                s,
+                "--once",
+                "--sheet-id",
+                sheet_id,
+            ],
         )
-    )
-    tasks.append(
-        Task(
-            name="aneti",
-            kind="watch",
-            interval_s=interval_tier2_min * 60,
-            cmd=[sys.executable, "-m", "jobscraper.aneti_watch", "--cdp", cdp],
-        )
-    )
+        for s in sources
+    ]
+
+    # We'll export SQLite -> CSV and sync it to "All jobs" after each cycle.
+    export_cmd = [sys.executable, "-c", "from jobscraper.export_all_jobs import export_all_jobs_csv; export_all_jobs_csv()"]
 
     # Loop
     with Live(_build_table(tasks, time.time()), refresh_per_second=2, console=console) as live:
         while True:
-            now_ts = time.time()
-            ran_any = False
+            cycle_start = time.time()
+            cycle_lines: List[str] = []
 
             for t in tasks:
-                if now_ts >= _task_next_run(t, now_ts):
-                    start = time.time()
-                    try:
-                        code, out = _run(t.cmd)
-                    except subprocess.TimeoutExpired:
-                        code, out = 124, "timeout"
+                start = time.time()
+                try:
+                    # For CDP-dependent sources, pass CDP_URL via env.
+                    code, out = _run(t.cmd, timeout_s=900)
+                except subprocess.TimeoutExpired:
+                    code, out = 124, "timeout"
 
-                    dur = time.time() - start
-                    t.last_run_ts = time.time()
-                    t.last_exit = code
-                    t.last_summary = _parse_summary(t, out)
+                dur = time.time() - start
+                t.last_run_ts = time.time()
+                t.last_exit = code
+                t.last_summary = _parse_summary(t, out)
 
-                    _append_log(
-                        log_csv,
-                        [
-                            _now().isoformat(timespec="seconds"),
-                            t.name,
-                            t.kind,
-                            str(code),
-                            f"{dur:.2f}",
-                            t.last_summary,
-                        ],
-                    )
+                _append_log(
+                    log_csv,
+                    [
+                        _now().isoformat(timespec="seconds"),
+                        t.name,
+                        t.kind,
+                        str(code),
+                        f"{dur:.2f}",
+                        t.last_summary,
+                    ],
+                )
 
-                    ran_any = True
+                # Collect NEW lines from output (run.py prints NEW: ... | url)
+                for line in (out or "").splitlines():
+                    if line.startswith("NEW:"):
+                        cycle_lines.append(f"{t.name}: {line[4:].strip()}")
 
-            live.update(_build_table(tasks, time.time()))
+                live.update(_build_table(tasks, time.time()))
 
-            # Sleep lightly so the UI stays responsive.
-            time.sleep(1 if ran_any else 2)
+            # Export all jobs CSV and sync it to All jobs tab.
+            try:
+                _run(export_cmd, timeout_s=120)
+                from jobscraper.sheets_all_jobs import AllJobsSheetConfig, write_all_jobs_csv_to_sheet
+                from jobscraper.export_all_jobs import ExportConfig
+
+                csv_path = ExportConfig().out_csv
+                uploaded = write_all_jobs_csv_to_sheet(
+                    AllJobsSheetConfig(sheet_id=sheet_id, tab=all_jobs_tab),
+                    csv_path,
+                )
+                _append_log(log_csv, [_now().isoformat(timespec="seconds"), "all_jobs_sync", "sync", "0", "0", f"rows={uploaded}"])
+            except Exception as e:
+                _append_log(log_csv, [_now().isoformat(timespec="seconds"), "all_jobs_sync", "sync", "1", "0", f"error={e}"])
+
+            # Send ONE pushover notification if any NEW relevant lines were appended.
+            if cycle_lines:
+                from jobscraper.alerts.pushover import send_summary
+
+                send_summary(
+                    title=f"JobScraper: {len(cycle_lines)} new relevant",
+                    lines=cycle_lines,
+                    click_url=f"https://docs.google.com/spreadsheets/d/{sheet_id}",
+                    click_title="Open sheet",
+                )
+
+            # sleep until next cycle
+            elapsed = time.time() - cycle_start
+            sleep_s = max(1, interval_min * 60 - elapsed)
+            for _ in range(int(sleep_s)):
+                live.update(_build_table(tasks, time.time()))
+                time.sleep(1)
 
 
 @app.command()
