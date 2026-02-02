@@ -49,10 +49,14 @@ class KeejobConfig:
     user_agent: str = "Mozilla/5.0 (compatible; job-scraper/0.1; +https://wassimfekih.com)"
 
 
+def _date_fr(d: dt.date) -> str:
+    return f"{d.day} {_MONTHS_FR[d.month]} {d.year}"
+
+
 def _today_fr(tz_offset_hours: int = 1) -> str:
     tz = dt.timezone(dt.timedelta(hours=tz_offset_hours))
     now = dt.datetime.now(dt.timezone.utc).astimezone(tz)
-    return f"{now.day} {_MONTHS_FR[now.month]} {now.year}"
+    return _date_fr(now.date())
 
 
 def _parse_list_page(html: str) -> List[dict]:
@@ -113,7 +117,12 @@ def scrape_keejob(cfg: Optional[KeejobConfig] = None) -> tuple[List[Job], str]:
     cfg = cfg or KeejobConfig()
 
     headers = {"User-Agent": cfg.user_agent}
-    today_fr = _today_fr()
+    # Keejob's "date" label is human text (French) and sometimes lags around midnight.
+    # Accept today OR yesterday when today_only is enabled.
+    tz = dt.timezone(dt.timedelta(hours=1))
+    now = dt.datetime.now(dt.timezone.utc).astimezone(tz).date()
+    today_fr = _date_fr(now)
+    yesterday_fr = _date_fr(now - dt.timedelta(days=1))
 
     out: List[Job] = []
 
@@ -126,14 +135,14 @@ def scrape_keejob(cfg: Optional[KeejobConfig] = None) -> tuple[List[Job], str]:
         if not page_jobs:
             break
 
-        # Stop condition: if today_only and this page has no jobs stamped today.
+        # Stop condition: if today_only and this page has no jobs stamped today/yesterday.
         if cfg.today_only:
-            any_today = any(j.get("date") == today_fr for j in page_jobs)
-            if not any_today:
+            any_recent = any(j.get("date") in (today_fr, yesterday_fr) for j in page_jobs)
+            if not any_recent:
                 break
 
         for j in page_jobs:
-            if cfg.today_only and j.get("date") != today_fr:
+            if cfg.today_only and j.get("date") not in (today_fr, yesterday_fr):
                 continue
 
             out.append(
