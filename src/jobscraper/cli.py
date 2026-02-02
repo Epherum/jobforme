@@ -145,15 +145,69 @@ def dashboard(
     interval_min: int = typer.Option(0, help="Full cycle interval minutes."),
     log_csv: Path = typer.Option(DEFAULT_LOG, help="CSV run log path."),
 ) -> None:
-    """Live dashboard loop. Runs a full cycle every N minutes and sends ONE notification."""
+    """Live dashboard loop.
 
-    from .config import load_config
+    Behavior:
+    - Prints the exact Windows command to start Chrome in CDP mode + open the required sites.
+    - Runs the smoke test automatically.
+    - If smoke fails, exits before starting the dashboard loop.
+    """
+
+    from .config import AppConfig, load_config
+    from .smoke import smoke_checks
 
     cfg = load_config()
+
+    # Resolve effective config (CLI overrides > env/config file).
     sheet_id = sheet_id or cfg.sheet_id
     jobs_today_tab = jobs_today_tab or cfg.jobs_today_tab
     all_jobs_tab = all_jobs_tab or cfg.all_jobs_tab
     interval_min = interval_min or cfg.interval_min
+
+    effective_cfg = AppConfig(
+        sheet_id=sheet_id,
+        sheet_account=cfg.sheet_account,
+        jobs_tab=cfg.jobs_tab,
+        jobs_today_tab=jobs_today_tab,
+        all_jobs_tab=all_jobs_tab,
+        cdp_url=cfg.cdp_url,
+        interval_min=interval_min,
+    )
+
+    # Always print the Windows snippet first so you can quickly start CDP Chrome.
+    tanit_url = "https://www.tanitjobs.com/jobs/"
+    aneti_url = "https://www.emploi.nat.tn/fo/Fr/global.php?page=146&=true&FormLinks_Sorting=7&FormLinks_Sorted=7"
+    console.print("\nWindows (PowerShell) snippet to start Chrome in CDP mode and open the 2 sites:")
+    console.print(
+        """
+# Pick chrome.exe (adjust if needed)
+$Chrome = "$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe"
+if (!(Test-Path $Chrome)) { $Chrome = "$env:ProgramFiles(x86)\\Google\\Chrome\\Application\\chrome.exe" }
+
+# Separate profile so it doesn't fight with your normal Chrome
+$UserData = "$env:LOCALAPPDATA\\JobScraperChrome"
+
+Start-Process $Chrome -ArgumentList @(
+  "--remote-debugging-port=9223",
+  "--user-data-dir=$UserData",
+  """ + tanit_url + """,
+  """ + aneti_url + """
+)
+""".strip()
+    )
+    console.print(f"Expected CDP URL from WSL: {effective_cfg.cdp_url} (should respond at /json/version)\n")
+
+    # Auto smoke test.
+    results = smoke_checks(effective_cfg)
+    bad = 0
+    for r in results:
+        status = "OK" if r.ok else "FAIL"
+        console.print(f"{status} {r.name}: {r.detail}")
+        if not r.ok:
+            bad += 1
+
+    if bad:
+        raise typer.Exit(1)
 
     if not sheet_id:
         console.print("sheet_id is required (pass --sheet-id or set SHEET_ID in data/config.env)")
@@ -206,7 +260,8 @@ def dashboard(
                     code, out = 124, "timeout"
 
                 dur = time.time() - start
-                t.last_run_ts = time.time()
+                # Important: we run a full cycle (all sources), then start ONE timer.
+                # So we do NOT stamp per-task last_run_ts here.
                 t.last_exit = code
                 t.last_summary = _parse_summary(t, out)
 
@@ -225,9 +280,21 @@ def dashboard(
                 # Collect NEW lines from output (run.py prints NEW: ... | url)
                 for line in (out or "").splitlines():
                     if line.startswith("NEW:"):
-                        cycle_lines.append(f"{t.name}: {line[4:].strip()}")
+                        payload = line[4:].strip()
+                        # run.py prints e.g.:
+                        # - "NEW: title | url"
+                        # - "NEW: title | company | location | url"
+                        # We only want the title to keep notifications short.
+                        title_only = payload.split(" | ", 1)[0].strip()
+                        if title_only:
+                            cycle_lines.append(title_only)
 
                 live.update(_build_table(tasks, time.time()))
+
+            # Mark the cycle end. Align all task timers to this single point.
+            cycle_end = time.time()
+            for t in tasks:
+                t.last_run_ts = cycle_end
 
             # Export all jobs CSV and sync it to All jobs tab.
             try:
@@ -251,8 +318,6 @@ def dashboard(
                 send_summary(
                     title=f"JobScraper: {len(cycle_lines)} new relevant",
                     lines=cycle_lines,
-                    click_url=f"https://docs.google.com/spreadsheets/d/{sheet_id}",
-                    click_title="Open sheet",
                 )
 
             # sleep until next cycle

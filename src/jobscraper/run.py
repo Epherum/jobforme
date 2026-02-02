@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import os
 from pathlib import Path
 
 from .db import JobDB
-import os
 
 from .sources.tanitjobs import TanitjobsConfig, scrape_tanitjobs
 from .tanitjobs_watch import fetch_first_page_jobs
@@ -51,6 +52,9 @@ def main() -> int:
 
     db = JobDB(Path("data") / "jobs.sqlite3")
 
+    # One consistent date label for all sources (local day).
+    today_label = dt.date.today().isoformat()
+
     if args.source == "tanitjobs":
         # Prefer CDP-based scrape (Cloudflare-friendly) if available.
         # Set CDP_URL env var for dashboard runs.
@@ -92,7 +96,7 @@ def main() -> int:
         if args.sheet_id:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
-            append_jobs(scfg, relevant_new, date_label="tanitjobs")
+            append_jobs(scfg, relevant_new, date_label=today_label)
 
         if args.notify and relevant_new:
             lines = [f"{j.title}\n{j.url}" for j in relevant_new]
@@ -100,7 +104,7 @@ def main() -> int:
 
     if args.source == "keejob":
         cfg = KeejobConfig(today_only=True)
-        jobs, date_label = scrape_keejob(cfg=cfg)
+        jobs, _date_label = scrape_keejob(cfg=cfg)
         new_jobs = db.upsert_jobs(jobs)
 
         relevant_new = [j for j in new_jobs if is_relevant(j.title)]
@@ -112,7 +116,7 @@ def main() -> int:
         if args.sheet_id:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
-            append_jobs(scfg, relevant_new, date_label=date_label)
+            append_jobs(scfg, relevant_new, date_label=today_label)
 
         if args.notify and relevant_new:
             lines = [f"{j.title} | {j.url}" for j in relevant_new]
@@ -120,7 +124,7 @@ def main() -> int:
 
     if args.source == "welcometothejungle":
         cfg = WTTJConfig(days=1, max_detail_pages=40, max_per_company=5)
-        jobs, date_label = scrape_wttj(cfg=cfg)
+        jobs, _date_label = scrape_wttj(cfg=cfg)
         new_jobs = db.upsert_jobs(jobs)
 
         relevant_new = [j for j in new_jobs if is_relevant(j.title)]
@@ -132,7 +136,7 @@ def main() -> int:
         if args.sheet_id:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
-            append_jobs(scfg, relevant_new, date_label=date_label)
+            append_jobs(scfg, relevant_new, date_label=today_label)
 
         if args.notify and relevant_new:
             lines = [f"{j.title} | {j.url}" for j in relevant_new]
@@ -140,7 +144,7 @@ def main() -> int:
 
     if args.source == "weworkremotely":
         cfg = WWRConfig()
-        jobs, date_label = scrape_weworkremotely(cfg=cfg)
+        jobs, _date_label = scrape_weworkremotely(cfg=cfg)
         new_jobs = db.upsert_jobs(jobs)
 
         relevant_new = [j for j in new_jobs if is_relevant(j.title)]
@@ -152,7 +156,7 @@ def main() -> int:
         if args.sheet_id:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
-            append_jobs(scfg, relevant_new, date_label=date_label)
+            append_jobs(scfg, relevant_new, date_label=today_label)
 
         if args.notify and relevant_new:
             lines = [f"{j.title} | {j.url}" for j in relevant_new]
@@ -160,7 +164,7 @@ def main() -> int:
 
     if args.source == "remoteok":
         cfg = RemoteOKConfig()
-        jobs, date_label = scrape_remoteok(cfg=cfg)
+        jobs, _date_label = scrape_remoteok(cfg=cfg)
         new_jobs = db.upsert_jobs(jobs)
 
         relevant_new = [j for j in new_jobs if is_relevant(j.title)]
@@ -172,7 +176,7 @@ def main() -> int:
         if args.sheet_id:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
-            append_jobs(scfg, relevant_new, date_label=date_label)
+            append_jobs(scfg, relevant_new, date_label=today_label)
 
         if args.notify and relevant_new:
             lines = [f"{j.title} | {j.url}" for j in relevant_new]
@@ -180,7 +184,7 @@ def main() -> int:
 
     if args.source == "remotive":
         cfg = RemotiveConfig()
-        jobs, date_label = scrape_remotive(cfg=cfg)
+        jobs, _date_label = scrape_remotive(cfg=cfg)
         new_jobs = db.upsert_jobs(jobs)
 
         relevant_new = [j for j in new_jobs if is_relevant(j.title)]
@@ -192,7 +196,7 @@ def main() -> int:
         if args.sheet_id:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
-            append_jobs(scfg, relevant_new, date_label=date_label)
+            append_jobs(scfg, relevant_new, date_label=today_label)
 
         if args.notify and relevant_new:
             lines = [f"{j.title} | {j.url}" for j in relevant_new]
@@ -201,7 +205,7 @@ def main() -> int:
     if args.source == "aneti":
         # CDP-only: ANETI blocks our server IP, so we use your Windows Chrome session.
         cfg = AnetiConfig(cdp_url="http://172.25.192.1:9223", max_offers=25)
-        jobs, date_label = scrape_aneti(cfg=cfg)
+        jobs, _date_label = scrape_aneti(cfg=cfg)
         new_jobs = db.upsert_jobs(jobs)
 
         relevant_new = [j for j in new_jobs if is_relevant(j.title)]
@@ -213,7 +217,7 @@ def main() -> int:
         if args.sheet_id:
             scfg = SheetsConfig(sheet_id=args.sheet_id, tab=args.sheet_tab, account=args.sheet_account)
             ensure_jobs_header(scfg)
-            append_jobs(scfg, relevant_new, date_label=date_label)
+            append_jobs(scfg, relevant_new, date_label=today_label)
 
         if args.notify and relevant_new:
             lines = [f"{j.title} | {j.url}" for j in relevant_new]

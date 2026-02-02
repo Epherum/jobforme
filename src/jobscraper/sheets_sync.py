@@ -60,8 +60,9 @@ def append_jobs(cfg: SheetsConfig, jobs: Sequence[Job], date_label: str) -> None
     rows = []
     for j in jobs:
         labels = ",".join(match_labels(j.title))
-        # decision/decision_at/notes intentionally left blank; managed in Sheets.
-        rows.append([date_label, j.source, j.title, j.company, j.location, j.url, labels, "", ""]) 
+        # Default decision to NEW so the dropdown starts in a consistent state.
+        # This is especially useful for the Jobs_Today inbox tab.
+        rows.append([date_label, j.source, j.title, j.company, j.location, j.url, labels, "NEW", ""]) 
 
     _run_gog(
         [
