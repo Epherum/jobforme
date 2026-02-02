@@ -41,6 +41,18 @@ STAT_RE = re.compile(r"^(?P<source>\w+):\s+scraped=(?P<scraped>\d+)\s+new=(?P<ne
 WATCH_RE = re.compile(r"NEW relevant=(?P<count>\d+)")
 
 
+SUSPICIOUS_ZERO_SCRAPE = {
+    # These sources almost always return >0 scraped when healthy.
+    # If they return 0, it's often a parsing/layout change, blocking, or network issue.
+    "keejob",
+    "welcometothejungle",
+    "weworkremotely",
+    "remoteok",
+    "tanitjobs",
+    "aneti",
+}
+
+
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -89,6 +101,38 @@ def _parse_summary(task: Task, output: str) -> str:
     return out[:160]
 
 
+def _detect_issues(task: Task, code: int, output: str) -> list[str]:
+    issues: list[str] = []
+
+    if code != 0:
+        issues.append(f"{task.name}: exit={code}")
+
+    m = STAT_RE.search(output or "")
+    if m:
+        scraped = int(m.group("scraped"))
+        if scraped == 0 and task.name in SUSPICIOUS_ZERO_SCRAPE:
+            issues.append(f"{task.name}: scraped=0 (blocked/layout change/CDP not ready)")
+
+    # Common transient failure hints
+    o = (output or "")
+    if "429" in o or "Too Many Requests" in o:
+        issues.append(f"{task.name}: rate-limited (429)")
+    if "403" in o and task.name in {"tanitjobs", "aneti"}:
+        issues.append(f"{task.name}: forbidden/blocked (403)")
+    if "Web Page Blocked" in o:
+        issues.append(f"{task.name}: blocked")
+
+    # De-dupe
+    out: list[str] = []
+    seen = set()
+    for it in issues:
+        if it in seen:
+            continue
+        seen.add(it)
+        out.append(it)
+    return out
+
+
 def _task_next_run(task: Task, now_ts: float) -> float:
     if task.last_run_ts is None:
         return now_ts
@@ -135,6 +179,25 @@ def _build_table(tasks: List[Task], now_ts: float) -> Table:
         )
 
     return table
+
+
+@app.command()
+def doctor() -> None:
+    """Best-effort environment check for day-to-day reliability."""
+    from .config import load_config
+    from .smoke import smoke_checks
+
+    cfg = load_config()
+    results = smoke_checks(cfg)
+
+    bad = 0
+    for r in results:
+        status = "OK" if r.ok else "FAIL"
+        console.print(f"{status} {r.name}: {r.detail}")
+        if not r.ok:
+            bad += 1
+
+    raise typer.Exit(1 if bad else 0)
 
 
 @app.command()
@@ -247,6 +310,7 @@ Start-Process $Chrome -ArgumentList @(
         while True:
             cycle_start = time.time()
             cycle_lines: List[str] = []
+            cycle_issues: List[str] = []
 
             for t in tasks:
                 start = time.time()
@@ -277,6 +341,10 @@ Start-Process $Chrome -ArgumentList @(
                     ],
                 )
 
+                # Collect issues (best-effort mode: keep running, but surface problems).
+                for iss in _detect_issues(t, code, out):
+                    cycle_issues.append(iss)
+
                 # Collect NEW lines from output (run.py prints NEW: ... | url)
                 for line in (out or "").splitlines():
                     if line.startswith("NEW:"):
@@ -289,6 +357,7 @@ Start-Process $Chrome -ArgumentList @(
                         if title_only:
                             cycle_lines.append(title_only)
 
+                # Update view after each task.
                 live.update(_build_table(tasks, time.time()))
 
             # Mark the cycle end. Align all task timers to this single point.
@@ -311,14 +380,36 @@ Start-Process $Chrome -ArgumentList @(
             except Exception as e:
                 _append_log(log_csv, [_now().isoformat(timespec="seconds"), "all_jobs_sync", "sync", "1", "0", f"error={e}"])
 
-            # Send ONE pushover notification if any NEW relevant lines were appended.
-            if cycle_lines:
+            # Send ONE pushover notification per cycle.
+            # - If we have new relevant jobs: send titles only.
+            # - If we have issues (best-effort mode): include a short issues section.
+            if cycle_lines or cycle_issues:
                 from jobscraper.alerts.pushover import send_summary
 
-                send_summary(
-                    title=f"JobScraper: {len(cycle_lines)} new relevant",
-                    lines=cycle_lines,
-                )
+                lines: List[str] = []
+                lines.extend(cycle_lines)
+
+                # Add issues at the end to keep the top of the notification useful.
+                if cycle_issues:
+                    lines.append("---")
+                    lines.append("Issues:")
+                    # de-dupe and cap
+                    uniq = []
+                    seen = set()
+                    for it in cycle_issues:
+                        if it in seen:
+                            continue
+                        seen.add(it)
+                        uniq.append(it)
+                    lines.extend(uniq[:8])
+                    if len(uniq) > 8:
+                        lines.append("…")
+
+                title = f"JobScraper: {len(cycle_lines)} new"
+                if cycle_issues:
+                    title += f" | {len(set(cycle_issues))} issues"
+
+                send_summary(title=title, lines=lines)
 
             # sleep until next cycle
             elapsed = time.time() - cycle_start
