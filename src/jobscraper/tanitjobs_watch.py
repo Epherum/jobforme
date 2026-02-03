@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import unquote, urlparse
 
 from playwright.sync_api import TimeoutError as PWTimeoutError
 from playwright.sync_api import sync_playwright
@@ -16,6 +17,29 @@ from jobscraper.alerts.ntfy import send_many
 DEFAULT_URL = "https://www.tanitjobs.com/"
 # Tanitjobs job URLs look like: https://www.tanitjobs.com/job/1979371/sales-agent/
 _JOB_RE = re.compile(r"/job/(\d+)(?:/|$)")
+
+
+def _title_from_job_url(job_url: str) -> str:
+    """Best-effort title from a Tanitjobs job URL.
+
+    Example: /job/1971667/charge-e-de-recouvrement-clients-facturation/
+    -> "charge e de recouvrement clients facturation"
+
+    Keeps it simple (no smart casing). Only used as a fallback when DOM has no text.
+    """
+    try:
+        p = urlparse(job_url)
+        parts = [x for x in p.path.split("/") if x]
+        # expected: ['job', '<id>', '<slug>', ...]
+        if len(parts) >= 3 and parts[0] == "job":
+            slug = unquote(parts[2])
+            slug = slug.replace("-", " ").replace("_", " ").strip()
+            slug = re.sub(r"\s+", " ", slug)
+            if slug and slug != parts[1]:
+                return slug
+    except Exception:
+        pass
+    return ""
 
 
 def fetch_first_page_jobs(
@@ -60,7 +84,17 @@ def fetch_first_page_jobs(
 
             items = page.eval_on_selector_all(
                 "a[href*='/job/']",
-                "els => els.map(a => ({href: a.getAttribute('href') || '', text: (a.textContent || '').trim()}))",
+                """
+                els => els.map(a => ({
+                  href: a.getAttribute('href') || '',
+                  // innerText is closer to what a human sees than textContent
+                  text: (a.innerText || '').trim(),
+                  aria: (a.getAttribute('aria-label') || '').trim(),
+                  title: (a.getAttribute('title') || '').trim(),
+                  // sometimes the title sits on a parent container
+                  cardText: ((a.closest('article') || a.closest('div') || a).innerText || '').trim(),
+                }))
+                """,
             )
 
             out: List[Tuple[str, str]] = []
@@ -68,6 +102,10 @@ def fetch_first_page_jobs(
             for it in items:
                 href = (it.get("href") or "").strip()
                 text = (it.get("text") or "").strip()
+                aria = (it.get("aria") or "").strip()
+                title_attr = (it.get("title") or "").strip()
+                card_text = (it.get("cardText") or "").strip()
+
                 m = _JOB_RE.search(href)
                 if not m:
                     continue
@@ -84,7 +122,20 @@ def fetch_first_page_jobs(
                 else:
                     job_url = "https://www.tanitjobs.com/" + href.lstrip("/")
 
-                out.append((jid, text or job_url))
+                # Prefer visible title text; fallback progressively.
+                title = text or aria or title_attr
+                if not title and card_text:
+                    # Use first non-empty line from the card container.
+                    for ln in (card_text.splitlines() if card_text else []):
+                        ln = ln.strip()
+                        if ln and len(ln) >= 3:
+                            title = ln
+                            break
+
+                if not title:
+                    title = _title_from_job_url(job_url)
+
+                out.append((jid, title or job_url))
                 if len(out) >= max_jobs:
                     break
 

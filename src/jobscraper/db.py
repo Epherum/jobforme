@@ -93,6 +93,8 @@ class JobDB:
                 # If we accidentally stored garbage titles, upgrade them.
                 bad_title = (
                     (existing_title.strip() in {"", "(unknown)"})
+                    or existing_title.strip().lower().startswith("http://")
+                    or existing_title.strip().lower().startswith("https://")
                     or ("annonces trouv" in existing_title.lower())
                     or ("offres et demandes" in existing_title.lower())
                     or ("offres disponibles" in existing_title.lower())
