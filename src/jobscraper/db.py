@@ -36,8 +36,18 @@ class JobDB:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # SQLite tuning for a long-running background process:
+        # - WAL improves concurrent reads/writes and reduces writer stalls
+        # - synchronous=NORMAL is a good durability/perf tradeoff for this use-case
         self.conn = sqlite3.connect(str(self.path))
         self.conn.row_factory = sqlite3.Row
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL;")
+            self.conn.execute("PRAGMA synchronous=NORMAL;")
+            self.conn.execute("PRAGMA busy_timeout=3000;")
+        except Exception:
+            # Best-effort. Some environments may restrict pragmas.
+            pass
         self._init()
 
     def _init(self) -> None:

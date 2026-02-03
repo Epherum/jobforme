@@ -141,11 +141,16 @@ def scrape_tanitjobs(cfg: Optional[TanitjobsConfig] = None, headed: bool = False
                 print("[tanitjobs] Waiting 120 seconds before scraping...\n")
                 page.wait_for_timeout(120_000)
 
-            # Save HTML for debugging/tuning selectors.
-            Path("debug").mkdir(exist_ok=True)
-            html_path = Path("debug") / "tanitjobs_last.html"
-            html_path.write_text(page.content(), encoding="utf-8")
+            jobs = _extract_jobs(page)
 
-            return _extract_jobs(page)
+            # Save HTML for debugging/tuning selectors only when needed.
+            # Enable explicitly with DEBUG_SNAPSHOTS=1, or when scraping returns 0 jobs.
+            debug_snapshots = (os.getenv("DEBUG_SNAPSHOTS") or "").strip() == "1"
+            if debug_snapshots or (len(jobs) == 0):
+                Path("debug").mkdir(exist_ok=True)
+                html_path = Path("debug") / "tanitjobs_last.html"
+                html_path.write_text(page.content(), encoding="utf-8")
+
+            return jobs
         finally:
             ctx.close()
