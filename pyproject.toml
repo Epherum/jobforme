@@ -8,6 +8,19 @@ version = "0.1.0"
 description = "Personal job scraper"
 requires-python = ">=3.10"
 
+dependencies = [
+  "playwright==1.58.0",
+  "PyYAML==6.0.3",
+  "selectolax==0.4.6",
+  "requests==2.32.5",
+  "click==8.1.7",
+  "typer==0.12.5",
+  "rich==13.9.4",
+]
+
+[project.scripts]
+jobscraper = "jobscraper.cli:app"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
