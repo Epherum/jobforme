@@ -258,18 +258,56 @@ def main() -> int:
                 or "https://www.linkedin.com/jobs/search/?geoId=102134353&f_TPR=r7200&sortBy=DD"
             ]
 
+        def _label_for_url(u: str) -> str:
+            # Best-effort labels for the known geoIds we use.
+            if "geoId=102134353" in u:
+                return "TN"
+            if "geoId=105015875" in u:
+                return "FR"
+            if "geoId=101282230" in u:
+                return "DE"
+            return "LI"
+
         all_jobs = []
         scraped_total = 0
+        by_label_scraped: dict[str, int] = {}
+        id_to_label: dict[str, str] = {}
+
         for url in urls:
+            label = _label_for_url(url)
             cfg = LinkedInCDPConfig(cdp_url=cdp_url, url=url, max_jobs=80)
             jobs, _reason = scrape_linkedin_first_page(cfg=cfg)
             scraped_total += len(jobs)
+            by_label_scraped[label] = by_label_scraped.get(label, 0) + len(jobs)
+            for j in jobs:
+                id_to_label[j.external_id] = label
             all_jobs.extend(jobs)
 
         new_jobs = db.upsert_jobs(all_jobs)
         relevant_new = [j for j in new_jobs if is_relevant(j.title)]
 
-        print(f"linkedin: searches={len(urls)} scraped={scraped_total} new={len(new_jobs)} relevant_new={len(relevant_new)}")
+        # Make the first line match the dashboard STAT_RE (source: scraped=.. new=.. relevant_new=..)
+        # and keep extra details after.
+        by_label_new: dict[str, int] = {}
+        by_label_rel: dict[str, int] = {}
+        for j in new_jobs:
+            lab = id_to_label.get(j.external_id, "LI")
+            by_label_new[lab] = by_label_new.get(lab, 0) + 1
+        for j in relevant_new:
+            lab = id_to_label.get(j.external_id, "LI")
+            by_label_rel[lab] = by_label_rel.get(lab, 0) + 1
+
+        details = " | ".join(
+            f"{lab}: scraped={by_label_scraped.get(lab, 0)} new={by_label_new.get(lab, 0)} rel={by_label_rel.get(lab, 0)}"
+            for lab in ["TN", "FR", "DE", "LI"]
+            if (by_label_scraped.get(lab, 0) or by_label_new.get(lab, 0) or by_label_rel.get(lab, 0))
+        )
+
+        print(
+            f"linkedin: scraped={scraped_total} new={len(new_jobs)} relevant_new={len(relevant_new)}"
+            + (f" | {details}" if details else "")
+        )
+
         for j in relevant_new[:20]:
             print(f"NEW: {j.title} | {j.company} | {j.location} | {j.url}")
 
