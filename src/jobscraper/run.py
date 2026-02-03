@@ -22,6 +22,15 @@ from .alerts.pushover import send_summary
 
 
 def main() -> int:
+    # Load data/config.env into os.environ (so env-only config like LINKEDIN_URLS works
+    # when running this module directly).
+    try:
+        from .config import load_config
+
+        load_config()
+    except Exception:
+        pass
+
     p = argparse.ArgumentParser()
     p.add_argument(
         "--source",
@@ -229,19 +238,38 @@ def main() -> int:
     if args.source == "linkedin":
         # CDP-only: use your logged-in Windows Chrome.
         cdp_url = os.getenv("CDP_URL", "http://172.25.192.1:9223").strip() or "http://172.25.192.1:9223"
-        url = (
-            args.linkedin_url
-            or (os.getenv("LINKEDIN_URL") or "").strip()
-            or "https://www.linkedin.com/jobs/search/?geoId=102134353&f_TPR=r7200&sortBy=DD"
-        )
+        # Allow multiple LinkedIn searches:
+        # - CLI: --linkedin-url runs a single URL
+        # - env: LINKEDIN_URLS can contain newline-separated or comma-separated URLs
+        #   (falls back to LINKEDIN_URL if LINKEDIN_URLS is empty)
+        raw_urls = (os.getenv("LINKEDIN_URLS") or "").strip()
+        urls: list[str] = []
+        if args.linkedin_url:
+            urls = [args.linkedin_url]
+        elif raw_urls:
+            # split by newline or comma
+            parts = []
+            for line in raw_urls.splitlines():
+                parts.extend([p.strip() for p in line.split(",") if p.strip()])
+            urls = [p for p in parts if p]
+        else:
+            urls = [
+                (os.getenv("LINKEDIN_URL") or "").strip()
+                or "https://www.linkedin.com/jobs/search/?geoId=102134353&f_TPR=r7200&sortBy=DD"
+            ]
 
-        cfg = LinkedInCDPConfig(cdp_url=cdp_url, url=url, max_jobs=80)
-        jobs, _reason = scrape_linkedin_first_page(cfg=cfg)
-        new_jobs = db.upsert_jobs(jobs)
+        all_jobs = []
+        scraped_total = 0
+        for url in urls:
+            cfg = LinkedInCDPConfig(cdp_url=cdp_url, url=url, max_jobs=80)
+            jobs, _reason = scrape_linkedin_first_page(cfg=cfg)
+            scraped_total += len(jobs)
+            all_jobs.extend(jobs)
 
+        new_jobs = db.upsert_jobs(all_jobs)
         relevant_new = [j for j in new_jobs if is_relevant(j.title)]
 
-        print(f"linkedin: scraped={len(jobs)} new={len(new_jobs)} relevant_new={len(relevant_new)}")
+        print(f"linkedin: searches={len(urls)} scraped={scraped_total} new={len(new_jobs)} relevant_new={len(relevant_new)}")
         for j in relevant_new[:20]:
             print(f"NEW: {j.title} | {j.company} | {j.location} | {j.url}")
 
