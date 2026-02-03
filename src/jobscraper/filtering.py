@@ -226,11 +226,6 @@ def is_blocked(text: str) -> bool:
     if not t:
         return False
 
-    # If the "title" is actually a URL, ignore it. This happens when a source fails
-    # to extract the title and we accidentally store the href.
-    if t.startswith("http://") or t.startswith("https://"):
-        return True
-
     return bool(_NEGATIVE_RE.search(t))
 
 
