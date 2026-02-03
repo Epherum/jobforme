@@ -20,9 +20,15 @@
 const JOBS_TODAY_TAB = 'Jobs_Today';
 const JOBS_TODAY_COL_TITLE = 3;
 
-// Edit this list freely. These are case-insensitive regex patterns.
-const NEGATIVE_TITLE_PATTERNS = [
-  // Seniority/leadership (broad)
+// For Jobs_Today we split "bad" titles into:
+// - too senior: keep row but set Decision to a short tag
+// - delete: remove row entirely
+
+const DECISION_TOO_SENIOR = 'OVERSENIOR'; // short + explicit
+const JOBS_TODAY_COL_DECISION = 8;
+
+// Case-insensitive regex patterns.
+const TOO_SENIOR_PATTERNS = [
   '\\bexecutive\\b',
   '\\bdirector\\b',
   '\\bdirecteur\\b',
@@ -39,35 +45,19 @@ const NEGATIVE_TITLE_PATTERNS = [
   '\\bsr\\b',
   '\\bconfirmé\\b',
   '\\bconfirmée\\b',
-  // Very broad. Keep here for sheet cleanup. Might be too aggressive for scraper.
-  '\\bmanager\\b',
-  '\\barchitect\\b',
+];
 
+const DELETE_TITLE_PATTERNS = [
   // Sales-heavy pipeline roles
   'sales\\s+development\\s+representative',
   'business\\s+development\\s+representative',
   '\\bsdr\\b',
   '\\bbdr\\b',
-  'télévente',
-  'télévendeur',
-  'télévendeurs',
-  'televente',
-  'televendeur',
-  'televendeurs',
-
-  // Support roles
-  'customer\\s+care',
-  'customer\\s+support',
-  'service\\s+client',
-  '\\bit\\s+support\\b',
-  '\\bhelp\\s*desk\\b',
 
   // Retail / cashier / service / logistics
   '\\bcaissier\\b',
   '\\bcaisse\\b',
   '\\bcashier\\b',
-  '\\bvendeur\\b',
-  '\\bvendeuse\\b',
   '\\blivreur\\b',
   '\\bcoursier\\b',
   '\\bchauffeur\\b',
@@ -86,17 +76,14 @@ const NEGATIVE_TITLE_PATTERNS = [
   'coffrage',
   'ferraillage',
 
-  // Manufacturing/industrial/quality (broad)
+  // Manufacturing/industrial/quality
   'manufactur',
   'industrialisation',
   'maintenance\\s+industrielle',
   'maintenance',
-  'automatisme',
   'assemblage',
   'contrôleur\\s+qualité',
   'controleur\\s+qualite',
-  '\\bqualité\\b',
-  '\\bqualite\\b',
 
   // QA/testing
   '\\bqa\\b',
@@ -116,9 +103,10 @@ const NEGATIVE_TITLE_PATTERNS = [
 ];
 
 function purgeJobsTodayNotAFitByTitle() {
-  const dryRun = true; // flip to false to delete
+  const dryRun = true; // flip to false to write/delete
 
-  const re = new RegExp(NEGATIVE_TITLE_PATTERNS.map(p => `(?:${p})`).join('|'), 'i');
+  const reSenior = new RegExp(TOO_SENIOR_PATTERNS.map(p => `(?:${p})`).join('|'), 'i');
+  const reDelete = new RegExp(DELETE_TITLE_PATTERNS.map(p => `(?:${p})`).join('|'), 'i');
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName(JOBS_TODAY_TAB);
@@ -133,28 +121,48 @@ function purgeJobsTodayNotAFitByTitle() {
 
   const values = sh.getRange(1, 1, lastRow, lastCol).getValues();
 
-  // Collect matching row indices (1-indexed sheet rows), skip header.
-  const matches = [];
+  // Collect actions (1-indexed sheet rows), skip header.
+  const toSenior = [];
+  const toDelete = [];
+
   for (let r = 2; r <= lastRow; r++) {
     const title = String(values[r - 1][JOBS_TODAY_COL_TITLE - 1] || '').trim();
     if (!title) continue;
-    if (re.test(title)) {
-      matches.push({ row: r, title });
+
+    if (reSenior.test(title)) {
+      toSenior.push({ row: r, title });
+      continue;
+    }
+
+    if (reDelete.test(title)) {
+      toDelete.push({ row: r, title });
+      continue;
     }
   }
 
-  Logger.log(`Matches: ${matches.length}`);
-  matches.slice(0, 50).forEach(m => Logger.log(`#${m.row}: ${m.title}`));
-  if (matches.length > 50) Logger.log('… (more omitted)');
+  Logger.log(`Too-senior matches: ${toSenior.length}`);
+  toSenior.slice(0, 30).forEach(m => Logger.log(`[OVERSENIOR] #${m.row}: ${m.title}`));
+
+  Logger.log(`Delete matches: ${toDelete.length}`);
+  toDelete.slice(0, 30).forEach(m => Logger.log(`[DELETE] #${m.row}: ${m.title}`));
 
   if (dryRun) {
-    Logger.log('Dry run ON. Set dryRun=false to delete these rows.');
+    Logger.log('Dry run ON. Set dryRun=false to apply changes.');
     return;
   }
 
-  // Delete from bottom to top so row numbers stay valid.
-  matches.sort((a, b) => b.row - a.row);
-  matches.forEach(m => sh.deleteRow(m.row));
+  // 1) Mark too-senior rows by setting Decision, but do not override a non-empty decision.
+  toSenior.forEach(m => {
+    const cell = sh.getRange(m.row, JOBS_TODAY_COL_DECISION);
+    const cur = String(cell.getValue() || '').trim();
+    if (!cur || cur === 'NEW') {
+      cell.setValue(DECISION_TOO_SENIOR);
+    }
+  });
 
-  Logger.log(`Deleted ${matches.length} rows.`);
+  // 2) Delete rows from bottom to top so row numbers stay valid.
+  toDelete.sort((a, b) => b.row - a.row);
+  toDelete.forEach(m => sh.deleteRow(m.row));
+
+  Logger.log(`Marked OVERSENIOR=${toSenior.length}, Deleted=${toDelete.length}.`);
 }
