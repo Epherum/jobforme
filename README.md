@@ -1,4 +1,4 @@
-# jobforme
+# jobformer
 
 Personal job scraper + lightweight workflow helper.
 
@@ -36,10 +36,10 @@ pipx ensurepath
 pipx install /path/to/job-scraper
 ```
 
-You should now have a global `jobscraper` command:
+You should now have a global `jobformer` command:
 
 ```bash
-jobscraper --help
+jobformer --help
 ```
 
 #### Option B: local venv
@@ -88,7 +88,7 @@ Make sure the agent user is authenticated for the account in `SHEET_ACCOUNT`.
 If Sheets calls fail, run a minimal test:
 
 ```bash
-jobscraper smoke
+jobformer smoke
 ```
 
 ## Windows: start Chrome in CDP mode
@@ -140,13 +140,13 @@ Recommended dropdown for `Jobs!H:H` (decision):
 
 ## Main commands
 
-### `jobscraper doctor`
+### `jobformer doctor`
 Best-effort environment check for day-to-day reliability.
 
-### `jobscraper smoke`
+### `jobformer smoke`
 Checks: SQLite, CDP connectivity, Pushover config (if enabled), Sheets access.
 
-### `jobscraper dashboard`
+### `jobformer dashboard`
 Runs a full cycle loop every `INTERVAL_MIN` minutes:
 - scrape sources
 - append relevant rows to `Jobs_Today`
@@ -156,10 +156,10 @@ Runs a full cycle loop every `INTERVAL_MIN` minutes:
 One-shot:
 
 ```bash
-jobscraper dashboard --once
+jobformer dashboard --once
 ```
 
-### `jobscraper transfer-today`
+### `jobformer transfer-today`
 Moves all rows from `Jobs_Today` into `Jobs`, then clears `Jobs_Today`.
 
 ### Scoring and extraction
@@ -167,19 +167,19 @@ Moves all rows from `Jobs_Today` into `Jobs`, then clears `Jobs_Today`.
 Extract page text into cache:
 
 ```bash
-jobscraper extract-text --max-jobs 200
+jobformer extract-text --max-jobs 200
 ```
 
 Score from cached text:
 
 ```bash
-jobscraper score-cached --max-jobs 200 --concurrency 1
+jobformer score-cached --max-jobs 200 --concurrency 1
 ```
 
 Score recent jobs (alternative path):
 
 ```bash
-jobscraper score-today --since-hours 6
+jobformer score-today --since-hours 6
 ```
 
 ### Manual Cloudflare workaround (Tanitjobs and similar)
@@ -191,7 +191,7 @@ When that happens, the fastest workflow is:
 2) Run:
 
 ```bash
-jobscraper score-open-tabs
+jobformer score-open-tabs
 ```
 
 This command:
@@ -205,7 +205,7 @@ This command:
 This is intentionally NOT part of the dashboard pipeline.
 
 ```bash
-jobscraper push-all-jobs
+jobformer push-all-jobs
 ```
 
 ## Troubleshooting
@@ -226,4 +226,4 @@ We canonicalize both forms to the same `/job/<id>` for matching.
 
 ---
 
-If you re-clone from scratch: follow “Quick start”, then run `jobscraper doctor` and `jobscraper dashboard --once`.
+If you re-clone from scratch: follow “Quick start”, then run `jobformer doctor` and `jobformer dashboard --once`.

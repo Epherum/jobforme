@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "jobscraper"
+name = "jobformer"
 version = "0.1.0"
 description = "Personal job scraper"
 requires-python = ">=3.10"
@@ -19,6 +19,8 @@ dependencies = [
 ]
 
 [project.scripts]
+jobformer = "jobscraper.cli:app"
+# Back-compat alias
 jobscraper = "jobscraper.cli:app"
 
 [tool.setuptools]
