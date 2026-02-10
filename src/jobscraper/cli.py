@@ -641,8 +641,15 @@ Start-Process $Chrome -ArgumentList @(
                         continue
                     url = (r[6] or "").strip()
                     score = (r[8] or "").strip() if len(r) > 8 else ""
-                    if url and not score:
-                        urls.append(url)
+                    if not url or score:
+                        continue
+
+                    # Tanitjobs detail pages frequently trigger Cloudflare challenges.
+                    # Keep Tanitjobs for scraping job *listings*, but skip detail text extraction in the dashboard pipeline.
+                    if "tanitjobs.com" in url:
+                        continue
+
+                    urls.append(url)
 
                 max_fetch = int((os.getenv("TEXT_FETCH_MAX_JOBS") or "50").strip() or "50")
                 state.extract_total = min(len(urls), max_fetch) if max_fetch else len(urls)
