@@ -203,7 +203,18 @@ def _init_dashboard_layout(progress: Progress) -> Layout:
     layout["body"].split_row(Layout(name="left"), Layout(name="right"))
 
     # Small static ASCII decal, kept stable to avoid any layout reflow/flicker.
-    decal = Text("\n  JobScraper\n  • scrape\n  • extract\n  • score\n", justify="center")
+    # Keep it static (no animation) and fixed-height to avoid reflow.
+    decal = Text(
+        "\n"
+        "   _       _      _____                             \n"
+        "  (_) ___ | |__  |  ___|__  _ __ _ __ ___   ___ _ __\n"
+        "  | |/ _ \\| '_ \\ | |_ / _ \\| '__| '_ ` _ \\ / _ \\ '__|\n"
+        "  | | (_) | |_) ||  _| (_) | |  | | | | | |  __/ |   \n"
+        " _/ |\\___/|_.__/ |_|  \\___/|_|  |_| |_| |_|\\___|_|   \n"
+        "|__/\n",
+        justify="center",
+        style="bold",
+    )
 
     left_group = Group(
         progress,
