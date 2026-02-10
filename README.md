@@ -1,16 +1,48 @@
 # job-scraper
 
-Job scraper + workflow helper.
+Personal job scraper + lightweight workflow helper.
 
-What it does:
-- Scrapes multiple job boards into a local SQLite DB (`data/jobs.sqlite3`).
-- Exports the full DB to `data/all_jobs.csv` and syncs it into the Google Sheet tab **All jobs** (for analytics).
-- Appends **relevant** jobs into a lightweight daily inbox tab **Jobs_Today**.
-- Scores newly seen relevant jobs with a local LLM (Ollama Qwen) and writes back to `Jobs_Today`.
-- You review Jobs_Today, then run a command that transfers the rows into **Jobs** (your editable workflow tab with dropdown + notes).
-- Sends **one Pushover notification** per full cycle when new relevant jobs were found.
+It is designed to:
+- scrape multiple job sources into a local SQLite DB
+- append only *relevant* jobs into a daily inbox tab (`Jobs_Today`) in Google Sheets
+- score those inbox rows with a local LLM (Ollama Qwen) and write back a score + short reason
+- let you transfer the inbox into your main workflow tab (`Jobs`)
 
-## Setup
+## What you get
+
+Local files:
+- SQLite DB: `data/jobs.sqlite3`
+- Run log: `data/run_log.csv`
+
+Google Sheets tabs:
+- `Jobs_Today`: daily inbox (append-only)
+- `Jobs`: your workflow tab (editable)
+- `All jobs`: optional, full export (manual command)
+
+## Quick start (Linux/WSL)
+
+### 1) Install
+
+This repo supports both a local venv and pipx.
+
+#### Option A: pipx (recommended)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y pipx
+pipx ensurepath
+
+# From a cloned repo
+pipx install /path/to/job-scraper
+```
+
+You should now have a global `jobscraper` command:
+
+```bash
+jobscraper --help
+```
+
+#### Option B: local venv
 
 ```bash
 cd job-scraper
@@ -18,50 +50,87 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
-python -m playwright install chromium
 ```
 
-### Config
+### 2) Playwright browser (required)
 
-Create `data/config.env` (copy from `data/config.env.example`):
+We use Playwright for CDP (Chrome remote debugging) navigation/extraction.
+
+```bash
+python3 -m playwright install chromium
+```
+
+### 3) Config
+
+Create `data/config.env` (copy from example):
 
 ```bash
 cp data/config.env.example data/config.env
 ```
 
-Fill:
-- `SHEET_ID`
-- `SHEET_ACCOUNT`
-- `CDP_URL` (Chrome/Edge launched with `--remote-debugging-port=9223`)
+Edit `data/config.env`:
 
-LinkedIn scoring needs an authenticated Chrome session over CDP (logged in to LinkedIn). If CDP is not reachable, LinkedIn jobs are skipped with a warning.
+Required:
+- `SHEET_ID=...`
+- `SHEET_ACCOUNT=...` (the Google account that `gog` is authenticated for)
+- `CDP_URL=http://172.25.192.1:9224` (WSL -> Windows host CDP endpoint)
 
-### Pushover
+Optional:
+- `LINKEDIN_URLS=...` (comma-separated)
+- `INTERVAL_MIN=20`
+- `TEXT_FETCH_MAX_JOBS=200`
 
-Create `data/pushover.env`:
+### 4) Google auth (gog)
+
+This project uses the `gog` CLI for Google Sheets access.
+Make sure the agent user is authenticated for the account in `SHEET_ACCOUNT`.
+
+If Sheets calls fail, run a minimal test:
 
 ```bash
-mkdir -p data
-cat > data/pushover.env <<'EOF'
-PUSHOVER_USER_KEY=...
-PUSHOVER_APP_TOKEN=...
-EOF
+jobscraper smoke
 ```
 
-### Google Sheet tabs
+## Windows: start Chrome in CDP mode
 
-Create these tabs:
-- `Jobs_Today` (scraper output, append-only)
-- `Jobs` (your workflow tab: decision dropdown + notes)
-- `All jobs` (full export for analytics)
+The simplest reliable approach is: run a dedicated Chrome profile with remote debugging enabled.
 
-LLM scoring adds columns J:M on Jobs/Jobs_Today:
-- llm_score, llm_decision, llm_reasons, llm_model
+This repo ships two PowerShell helpers in `windows/`:
+- `windows/start_job_scraper_chrome.ps1`
+- `windows/start_job_scraper_chrome_minimized.ps1`
 
-Recommended `Jobs` schema (A:M):
-- source, labels, title, company, location, date_added, url, decision, notes, llm_score, llm_decision, llm_reasons, llm_model
+Run one of them on Windows. It launches Chrome with:
+- `--remote-debugging-port=9224`
+- a dedicated user-data-dir (`%LOCALAPPDATA%\JobScraperChrome`)
 
-Set a **dropdown** on `Jobs!H:H` with values:
+Then set in `data/config.env`:
+
+```env
+CDP_URL=http://172.25.192.1:9224
+```
+
+Notes:
+- Log into LinkedIn/Tanitjobs in that Chrome window.
+- Keep that Chrome running while the scraper runs.
+
+## Google Sheet schema
+
+Tabs `Jobs_Today` and `Jobs` should have these columns:
+
+A: source
+B: labels
+C: title
+D: company
+E: location
+F: date_added
+G: url
+H: decision
+I: score (LLM score)
+J: reason (short justification)
+
+`Jobs_Today` is append-only. `Jobs` is your workflow.
+
+Recommended dropdown for `Jobs!H:H` (decision):
 - NEW
 - SAVED
 - APPLIED
@@ -69,51 +138,92 @@ Set a **dropdown** on `Jobs!H:H` with values:
 - REJECTED
 - ARCHIVED
 
-(We do not use Apps Script. The view/tab limitations are avoided by the Jobs_Today transfer flow.)
+## Main commands
 
-## Commands
+### `jobscraper doctor`
+Best-effort environment check for day-to-day reliability.
 
-### Smoke test
+### `jobscraper smoke`
+Checks: SQLite, CDP connectivity, Pushover config (if enabled), Sheets access.
 
-Checks: SQLite, CDP, Pushover config, Sheets access.
+### `jobscraper dashboard`
+Runs a full cycle loop every `INTERVAL_MIN` minutes:
+- scrape sources
+- append relevant rows to `Jobs_Today`
+- extract text + score cached rows (incremental progress in the dashboard)
+- send a single notification per cycle (if configured)
 
-```bash
-python -m jobscraper smoke
-```
-
-### Dashboard (full cycle loop)
-
-Runs all sources every `INTERVAL_MIN` minutes.
-- Appends new relevant rows into `Jobs_Today`
-- Syncs full DB into `All jobs`
-- Sends 1 Pushover notification if anything new relevant was found
+One-shot:
 
 ```bash
-python -m jobscraper dashboard
+jobscraper dashboard --once
 ```
 
-Skip LLM scoring (for smoke tests):
+### `jobscraper transfer-today`
+Moves all rows from `Jobs_Today` into `Jobs`, then clears `Jobs_Today`.
+
+### Scoring and extraction
+
+Extract page text into cache:
 
 ```bash
-DISABLE_LLM_SCORE=1 python -m jobscraper dashboard
+jobscraper extract-text --max-jobs 200
 ```
 
-### Transfer today inbox into workflow
+Score from cached text:
 
 ```bash
-python -m jobscraper transfer-today
+jobscraper score-cached --max-jobs 200 --concurrency 1
 ```
 
-### Score recent relevant jobs (LLM)
+Score recent jobs (alternative path):
 
 ```bash
-python -m jobscraper score-today --since-hours 6
+jobscraper score-today --since-hours 6
 ```
 
-Optional env vars:
-- `LLM_MODEL` (default: qwen2.5:7b-instruct)
+### Manual Cloudflare workaround (Tanitjobs and similar)
 
-## Data
-- SQLite DB: `data/jobs.sqlite3`
-- Full export CSV: `data/all_jobs.csv`
-- Run log: `data/run_log.csv`
+Some sites (notably Tanitjobs job detail pages) can trigger Cloudflare challenges.
+When that happens, the fastest workflow is:
+
+1) Open the blocked job URLs manually in the CDP Chrome window (so Cloudflare clears).
+2) Run:
+
+```bash
+jobscraper score-open-tabs
+```
+
+This command:
+- reads the currently open CDP tabs (no navigation)
+- extracts text from those already-open pages
+- writes cache entries
+- scores any matching unscored `Jobs_Today` rows and updates columns I:J
+
+### Full DB export to `All jobs` (manual)
+
+This is intentionally NOT part of the dashboard pipeline.
+
+```bash
+jobscraper push-all-jobs
+```
+
+## Troubleshooting
+
+### CDP not reachable
+- Ensure Chrome is running with `--remote-debugging-port=9224`
+- From WSL, the Windows host is typically the default gateway (example `172.25.192.1`).
+- Confirm `http://172.25.192.1:9224/json/version` is reachable from WSL.
+
+### Tanitjobs redirects change the URL
+Tanitjobs can redirect short URLs like `/job/<id>/` to a slug URL.
+We canonicalize both forms to the same `/job/<id>` for matching.
+
+### Dependencies
+- Python >= 3.10
+- Playwright Chromium installed (`python3 -m playwright install chromium`)
+- Optional: Ollama running for local LLM scoring
+
+---
+
+If you re-clone from scratch: follow “Quick start”, then run `jobscraper doctor` and `jobscraper dashboard --once`.

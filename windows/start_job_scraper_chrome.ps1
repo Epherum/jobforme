@@ -1,0 +1,16 @@
+$Chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+if (!(Test-Path $Chrome)) { $Chrome = "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe" }
+
+$UserData = "$env:LOCALAPPDATA\JobScraperChrome"
+
+$args = @(
+  "--remote-debugging-port=9224",
+  "--remote-debugging-address=0.0.0.0",
+  "--remote-allow-origins=*",
+  "--user-data-dir=$UserData",
+
+  "--window-size=800,600",
+  "https://www.tanitjobs.com/jobs/"
+)
+
+Start-Process -FilePath $Chrome -ArgumentList $args
