@@ -1110,13 +1110,24 @@ def score_open_tabs(
 ) -> None:
     """Manual workflow helper.
 
-    Reads the currently open URLs in the CDP Chrome session (tabs you opened yourself).
-    For each URL:
+    Primary mode (default):
+    - Reads currently open URLs in the CDP Chrome session (tabs you opened yourself)
     - Extracts text directly from the already-open tab (no navigation)
     - Writes it into job_text_cache
     - If the URL exists unscored in Jobs_Today, scores it and updates columns I:J
 
-    Works for any site as long as the job URL matches the sheet row URL.
+    Cloudflare workflow (optional):
+    - Use --open-unscored to automatically open unscored sheet URLs in the CDP browser.
+      Then you manually solve any challenges in Chrome.
+      Then rerun score-open-tabs (without --open-unscored) to extract+score.
+
+    Filtering:
+    - Use --sites to restrict to specific hosts, e.g. "tanitjobs.com".
+
+    Examples:
+      jobformer score-open-tabs --open-unscored --sites tanitjobs.com --max-open 20
+      # solve challenges in the CDP Chrome window
+      jobformer score-open-tabs --sites tanitjobs.com
     """
 
     import os
