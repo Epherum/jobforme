@@ -245,7 +245,14 @@ def _refresh_dashboard_layout(layout: Layout, tasks: List[Task], now_ts: float, 
     recent.add_column("Exit", width=6, justify="right")
     recent.add_column("Summary")
     for name, exit_code, summary in (state.last_results or [])[-8:]:
-        recent.add_row(name, exit_code, _shorten(summary, 80))
+        code_txt = (exit_code or "").strip() or "-"
+        if code_txt == "0":
+            code_cell = Text(code_txt, style="green")
+        elif code_txt in {"-", ""}:
+            code_cell = Text(code_txt, style="dim")
+        else:
+            code_cell = Text(code_txt, style="red")
+        recent.add_row(name, code_cell, _shorten(summary, 80))
     layout["right"].update(Panel(recent, title="Recent results", padding=(0, 1)))
 
     footer = Text()
@@ -253,8 +260,21 @@ def _refresh_dashboard_layout(layout: Layout, tasks: List[Task], now_ts: float, 
     next_run = min((_task_next_run(t, now_ts) for t in tasks), default=now_ts)
     remaining = max(0, int(next_run - now_ts))
     footer.append(_fmt_secs(remaining), style="bold")
+
     footer.append("  •  ")
-    footer.append(f"Total tasks: {len(tasks)}")
+    footer.append(f"New: {state.new_relevant}")
+    footer.append("  •  ")
+    footer.append(f"Issues: {state.issues}")
+    footer.append("  •  ")
+    footer.append(f"Cache ok/blocked: {state.cache_ok}/{state.cache_blocked}")
+
+    if state.unscored_remaining is not None:
+        footer.append("  •  ")
+        footer.append(f"Unscored: {state.unscored_remaining}")
+
+    footer.append("  •  ")
+    footer.append(f"Tasks: {len(tasks)}", style="dim")
+
     layout["footer"].update(Panel(Align.left(footer), padding=(0, 1)))
 
 
@@ -543,7 +563,7 @@ Start-Process $Chrome -ArgumentList @(
             state.score_scored = 0
             state.score_target = 0
 
-            state.phase = "scraping sources"
+            state.phase = "Scrape sources"
             _update_live(live_ctx, force=True)
 
             for t in tasks:
@@ -592,7 +612,7 @@ Start-Process $Chrome -ArgumentList @(
                             cycle_lines.append(title_only)
 
                 state.sources_done += 1
-                state.phase = f"scraping sources ({state.sources_done}/{state.sources_total})"
+                state.phase = f"Scrape sources ({state.sources_done}/{state.sources_total})"
                 _add_result(t.name, code, t.last_summary)
                 _plain_print(f"{t.name}: exit={code} summary={_shorten(t.last_summary)}")
                 _update_live(live_ctx)
@@ -603,7 +623,7 @@ Start-Process $Chrome -ArgumentList @(
                 t.last_run_ts = cycle_end
 
             # Extract job text into cache.
-            state.phase = "extracting text cache"
+            state.phase = "Extract text (cache)"
             extract_task.last_exit = None
             extract_task.last_summary = "extracting text"
             _update_live(live_ctx)
@@ -662,7 +682,7 @@ Start-Process $Chrome -ArgumentList @(
 
             # LLM scoring from cached text.
             # Run up to 3 passes if there are still unscored rows.
-            state.phase = "scoring cached (pass 1/3)"
+            state.phase = "Score (cached) pass 1/3"
             score_task.last_exit = None
             score_task.last_summary = "scoring"
             _update_live(live_ctx)
@@ -684,7 +704,7 @@ Start-Process $Chrome -ArgumentList @(
                     last_missing = None
 
                     for p in range(1, 4):
-                        state.phase = f"scoring cached (pass {p}/3)"
+                        state.phase = f"Score (cached) pass {p}/3"
                         _update_live(live_ctx)
 
                         state.score_scored = 0
@@ -742,7 +762,7 @@ Start-Process $Chrome -ArgumentList @(
             # Send ONE pushover notification per cycle.
             # - If we have new relevant jobs: send titles only.
             # - If we have issues (best-effort mode): include a short issues section.
-            state.phase = "sending notifications"
+            state.phase = "Notify"
             notify_task.last_exit = 0
             notify_task.last_summary = "no notification"
             if cycle_lines or cycle_issues:
@@ -795,7 +815,7 @@ Start-Process $Chrome -ArgumentList @(
 
             sleep_s = max(1, interval_min * 60 - elapsed)
             for sec in range(int(sleep_s)):
-                state.phase = f"sleeping ({_fmt_secs(int(sleep_s - sec))})"
+                state.phase = f"Sleep ({_fmt_secs(int(sleep_s - sec))})"
                 # Avoid flicker: update UI at most every ~5 seconds during long sleeps.
                 if sec % 5 == 0:
                     _update_live(live_ctx)
