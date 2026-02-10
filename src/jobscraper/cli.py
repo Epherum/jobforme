@@ -864,9 +864,9 @@ def score_today(
     max_jobs: int = typer.Option(50, help="Maximum jobs to score in one run."),
     concurrency: int = typer.Option(2, help="Scoring concurrency."),
     model: str = typer.Option("", help="Ollama model (default qwen2.5:7b-instruct)."),
-    update_sheet: bool = typer.Option(True, "--update-sheet/--no-update-sheet", help="Update Jobs_Today with score columns (I:K)."),
+    update_sheet: bool = typer.Option(True, "--update-sheet/--no-update-sheet", help="Update Jobs_Today with score columns (I:J)."),
 ) -> None:
-    """Score recent relevant jobs from the DB and optionally update Jobs_Today (I:K)."""
+    """Score recent relevant jobs from the DB and optionally update Jobs_Today (I:J)."""
     from .config import load_config
     from .job_scoring import score_recent_jobs
     from .job_scoring_sheet import score_unscored_sheet_rows
@@ -927,7 +927,7 @@ def score_today_alias(
     max_jobs: int = typer.Option(50, help="Maximum jobs to score in one run."),
     concurrency: int = typer.Option(2, help="Scoring concurrency."),
     model: str = typer.Option("", help="Ollama model (default qwen2.5:7b-instruct)."),
-    update_sheet: bool = typer.Option(True, "--update-sheet/--no-update-sheet", help="Update Jobs_Today with score columns (I:K)."),
+    update_sheet: bool = typer.Option(True, "--update-sheet/--no-update-sheet", help="Update Jobs_Today with score columns (I:J)."),
 ) -> None:
     """Alias for score-today (underscore variant)."""
     return score_today(
@@ -987,7 +987,7 @@ def score_cached(
     model: str = typer.Option("", help="Ollama model (default qwen2.5:7b-instruct)."),
     extract_missing: bool = typer.Option(False, help="Attempt text extraction for missing cache entries."),
 ) -> None:
-    """Score Jobs_Today rows using cached job text, and update columns I:K."""
+    """Score Jobs_Today rows using cached job text, and update columns I:J."""
     from .config import load_config
     from .job_scoring_cached import score_unscored_sheet_rows_from_cache
     from .llm_score import DEFAULT_MODEL

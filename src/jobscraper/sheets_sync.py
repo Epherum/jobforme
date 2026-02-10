@@ -32,8 +32,7 @@ def ensure_jobs_header(cfg: SheetsConfig) -> None:
     # G: url
     # H: decision
     # I: score
-    # J: llm_decision
-    # K: reason
+    # J: reason
     values = [[
         "source",
         "labels",
@@ -44,7 +43,6 @@ def ensure_jobs_header(cfg: SheetsConfig) -> None:
         "url",
         "decision",
         "score",
-        "llm_decision",
         "reason",
     ]]
     _run_gog(
@@ -53,7 +51,7 @@ def ensure_jobs_header(cfg: SheetsConfig) -> None:
             "sheets",
             "update",
             cfg.sheet_id,
-            f"{cfg.tab}!A1:K1",
+            f"{cfg.tab}!A1:J1",
             "--account",
             cfg.account,
             "--values-json",
@@ -83,7 +81,6 @@ def append_jobs(cfg: SheetsConfig, jobs: Sequence[Job], date_label: str) -> None
                 j.url,
                 decision,
                 "",  # score
-                "",  # llm_decision
                 "",  # reason
             ]
         )
@@ -94,7 +91,7 @@ def append_jobs(cfg: SheetsConfig, jobs: Sequence[Job], date_label: str) -> None
             "sheets",
             "append",
             cfg.sheet_id,
-            f"{cfg.tab}!A:K",
+            f"{cfg.tab}!A:J",
             "--account",
             cfg.account,
             "--values-json",
@@ -105,7 +102,7 @@ def append_jobs(cfg: SheetsConfig, jobs: Sequence[Job], date_label: str) -> None
     )
 
 
-def _get_sheet_rows(cfg: SheetsConfig, range_cols: str = "A:K") -> list[list[str]]:
+def _get_sheet_rows(cfg: SheetsConfig, range_cols: str = "A:J") -> list[list[str]]:
     out = _run_gog(
         [
             "gog",
@@ -143,7 +140,7 @@ def find_rows_by_url(cfg: SheetsConfig, urls: Sequence[str]) -> dict[str, int]:
 
 
 def update_job_scores(cfg: SheetsConfig, updates: Sequence[dict]) -> int:
-    """Update Jobs/Jobs_Today rows by URL with LLM score fields (I:K).
+    """Update Jobs/Jobs_Today rows by URL with LLM score fields (I:J).
 
     updates: list of {url, score, decision, reasons}
     Returns number of rows updated in the sheet.
@@ -162,7 +159,7 @@ def update_job_scores(cfg: SheetsConfig, updates: Sequence[dict]) -> int:
         row = url_to_row.get(u["url"])
         if not row:
             continue
-        row_to_values[row] = [u.get("score", ""), u.get("decision", ""), u.get("reasons", "")]
+        row_to_values[row] = [u.get("score", ""), u.get("reasons", "")]
 
     if not row_to_values:
         return 0
@@ -177,7 +174,7 @@ def update_job_scores(cfg: SheetsConfig, updates: Sequence[dict]) -> int:
                 "sheets",
                 "update",
                 cfg.sheet_id,
-                f"{cfg.tab}!I{start}:K{end}",
+                f"{cfg.tab}!I{start}:J{end}",
                 "--account",
                 cfg.account,
                 "--values-json",
