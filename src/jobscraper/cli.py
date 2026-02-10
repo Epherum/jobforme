@@ -7,15 +7,19 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import typer
+from rich.align import Align
 from rich.console import Console
 from rich.live import Live
+from rich.layout import Layout
+from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
+from rich.text import Text
 
 
 app = typer.Typer(add_completion=False)
@@ -152,46 +156,107 @@ def _task_next_run(task: Task, now_ts: float) -> float:
     return task.last_run_ts + task.interval_s
 
 
-def _build_table(tasks: List[Task], now_ts: float) -> Table:
-    table = Table(title="JobScraper Dashboard", expand=True)
-    table.add_column("Task", no_wrap=True)
-    table.add_column("Kind", width=6)
-    table.add_column("Interval")
-    table.add_column("Next")
-    table.add_column("Progress")
-    table.add_column("Last exit", justify="right")
-    table.add_column("Last summary")
+@dataclass
+class DashboardState:
+    phase: str = "starting"
+    cycle_no: int = 0
+    new_relevant: int = 0
+    issues: int = 0
+    unscored_remaining: Optional[int] = None
+    cache_ok: int = 0
+    cache_blocked: int = 0
+    sources_done: int = 0
+    sources_total: int = 0
+    extract_processed: int = 0
+    extract_total: int = 0
+    score_scored: int = 0
+    score_target: int = 0
+    last_results: List[Tuple[str, str, str]] = field(default_factory=list)
 
-    for t in tasks:
-        nxt = _task_next_run(t, now_ts)
-        remaining = max(0, int(nxt - now_ts))
-        interval = t.interval_s
 
-        if interval <= 0:
-            prog = 1.0
-        elif t.last_run_ts is None:
-            prog = 0.0
-        else:
-            prog = min(1.0, max(0.0, (now_ts - t.last_run_ts) / interval))
+def _shorten(text: str, max_len: int = 64) -> str:
+    t = (text or "").strip()
+    if len(t) <= max_len:
+        return t
+    return t[: max(0, max_len - 1)].rstrip() + "…"
 
-        def fmt_secs(s: int) -> str:
-            if s >= 3600:
-                return f"{s//3600}h{(s%3600)//60:02d}"
-            if s >= 60:
-                return f"{s//60}m{s%60:02d}"
-            return f"{s}s"
 
-        table.add_row(
-            t.name,
-            t.kind,
-            fmt_secs(interval),
-            "now" if remaining == 0 else fmt_secs(remaining),
-            f"{int(prog*100):3d}%",
-            "" if t.last_exit is None else str(t.last_exit),
-            t.last_summary,
-        )
+def _fmt_secs(s: int) -> str:
+    if s >= 3600:
+        return f"{s//3600}h{(s%3600)//60:02d}"
+    if s >= 60:
+        return f"{s//60}m{s%60:02d}"
+    return f"{s}s"
 
-    return table
+
+def _build_dashboard(tasks: List[Task], now_ts: float, state: DashboardState) -> Layout:
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=5),
+        Layout(name="body"),
+        Layout(name="footer", size=3),
+    )
+    layout["body"].split_row(Layout(name="left"), Layout(name="right"))
+
+    header = Table.grid(expand=True)
+    header.add_column(ratio=2)
+    header.add_column(ratio=1)
+    header.add_column(ratio=1)
+    header.add_column(ratio=1)
+    header.add_row(
+        f"[bold]Phase:[/bold] {state.phase}",
+        f"[bold]New relevant:[/bold] {state.new_relevant}",
+        f"[bold]Issues:[/bold] {state.issues}",
+        f"[bold]Unscored:[/bold] {state.unscored_remaining if state.unscored_remaining is not None else '-'}",
+    )
+    header.add_row(
+        f"[bold]Cache ok/blocked:[/bold] {state.cache_ok}/{state.cache_blocked}",
+        f"[bold]Cycle:[/bold] {state.cycle_no}",
+        f"[bold]Time:[/bold] {_now().astimezone().strftime('%H:%M:%S')}",
+        "",
+    )
+
+    layout["header"].update(Panel(header, title="JobScraper", padding=(0, 1)))
+
+    progress = Progress(
+        TextColumn("[bold]{task.description}[/bold]"),
+        BarColumn(bar_width=None),
+        TextColumn("{task.completed}/{task.total}"),
+        expand=True,
+    )
+    progress.add_task("Sources", completed=state.sources_done, total=max(state.sources_total, 1))
+    progress.add_task(
+        "Extract text",
+        completed=state.extract_processed,
+        total=state.extract_total if state.extract_total > 0 else 1,
+    )
+    progress.add_task(
+        "Score cache",
+        completed=state.score_scored,
+        total=state.score_target if state.score_target > 0 else 1,
+    )
+
+    layout["left"].update(Panel(progress, title="Progress", padding=(1, 1)))
+
+    recent = Table(expand=True, show_header=True)
+    recent.add_column("Task", no_wrap=True)
+    recent.add_column("Exit", width=6, justify="right")
+    recent.add_column("Summary")
+    for name, exit_code, summary in (state.last_results or [])[-8:]:
+        recent.add_row(name, exit_code, _shorten(summary, 80))
+
+    layout["right"].update(Panel(recent, title="Recent results", padding=(0, 1)))
+
+    footer = Text()
+    footer.append("Next run in: ")
+    next_run = min((_task_next_run(t, now_ts) for t in tasks), default=now_ts)
+    remaining = max(0, int(next_run - now_ts))
+    footer.append(_fmt_secs(remaining), style="bold")
+    footer.append("  •  ")
+    footer.append(f"Total tasks: {len(tasks)}")
+    layout["footer"].update(Panel(Align.left(footer), padding=(0, 1)))
+
+    return layout
 
 
 @app.command()
@@ -221,6 +286,7 @@ def dashboard(
     interval_min: int = typer.Option(0, help="Full cycle interval minutes."),
     log_csv: Path = typer.Option(DEFAULT_LOG, help="CSV run log path."),
     show_windows_snippet: bool = typer.Option(False, help="Print the Windows PowerShell snippet for starting Chrome in CDP mode."),
+    once: bool = typer.Option(False, "--once/--no-once", help="Run one cycle and exit."),
 ) -> None:
     """Live dashboard loop.
 
@@ -405,13 +471,46 @@ Start-Process $Chrome -ArgumentList @(
     disable_score = (os.getenv("DISABLE_LLM_SCORE") or "").strip().lower() in {"1", "true", "yes", "y"}
 
     dashboard_rows = tasks + [extract_task, score_task, all_jobs_task, notify_task]
+    state = DashboardState(sources_total=len(tasks))
+    is_tty = console.is_terminal and sys.stdout.isatty()
+
+    def _add_result(name: str, exit_code: Optional[int], summary: str) -> None:
+        state.last_results.append((name, "" if exit_code is None else str(exit_code), summary))
+
+    def _update_live(live: Optional[Live] = None) -> None:
+        if not is_tty or live is None:
+            return
+        live.update(_build_dashboard(dashboard_rows, time.time(), state))
+
+    def _plain_print(line: str) -> None:
+        if is_tty:
+            return
+        console.print(line)
+
+    live_ctx = Live(_build_dashboard(dashboard_rows, time.time(), state), refresh_per_second=4, console=console) if is_tty else None
 
     # Loop
-    with Live(_build_table(dashboard_rows, time.time()), refresh_per_second=2, console=console) as live:
+    if live_ctx:
+        live_ctx.__enter__()
+    try:
         while True:
             cycle_start = time.time()
-            cycle_lines: List[str] = []
-            cycle_issues: List[str] = []
+            cycle_lines = []
+            cycle_issues = []
+            state.cycle_no += 1
+            state.new_relevant = 0
+            state.issues = 0
+            state.unscored_remaining = None
+            state.cache_ok = 0
+            state.cache_blocked = 0
+            state.sources_done = 0
+            state.extract_processed = 0
+            state.extract_total = 0
+            state.score_scored = 0
+            state.score_target = 0
+
+            state.phase = "scraping sources"
+            _update_live(live_ctx)
 
             for t in tasks:
                 start = time.time()
@@ -458,8 +557,11 @@ Start-Process $Chrome -ArgumentList @(
                         if title_only:
                             cycle_lines.append(title_only)
 
-                # Update view after each task.
-                live.update(_build_table(dashboard_rows, time.time()))
+                state.sources_done += 1
+                state.phase = f"scraping sources ({state.sources_done}/{state.sources_total})"
+                _add_result(t.name, code, t.last_summary)
+                _plain_print(f"{t.name}: exit={code} summary={_shorten(t.last_summary)}")
+                _update_live(live_ctx)
 
             # Mark the cycle end. Align all task timers to this single point.
             cycle_end = time.time()
@@ -467,10 +569,12 @@ Start-Process $Chrome -ArgumentList @(
                 t.last_run_ts = cycle_end
 
             # Extract job text into cache.
+            state.phase = "extracting text cache"
             extract_task.last_exit = None
             extract_task.last_summary = "extracting text"
-            live.update(_build_table(dashboard_rows, time.time()))
+            _update_live(live_ctx)
             try:
+                from jobscraper.sheets_sync import SheetsConfig
                 from jobscraper.text_extraction import extract_text_for_sheet
 
                 summary = extract_text_for_sheet(
@@ -480,17 +584,24 @@ Start-Process $Chrome -ArgumentList @(
                     refresh=False,
                 )
                 extract_task.last_exit = 0
-                extract_task.last_summary = f"fetched={summary['fetched']} ok={summary['ok']} blocked={summary['blocked']}"
+                extract_task.last_summary = f"candidates={summary['candidates']} ok={summary['ok']} blocked={summary['blocked']}"
+                state.extract_total = int(summary.get("candidates", 0) or 0)
+                state.extract_processed = int(summary.get("ok", 0) or 0) + int(summary.get("blocked", 0) or 0) + int(summary.get("empty", 0) or 0) + int(summary.get("errors", 0) or 0)
+                state.cache_ok = int(summary.get("ok", 0) or 0)
+                state.cache_blocked = int(summary.get("blocked", 0) or 0)
             except Exception as e:
                 extract_task.last_exit = 1
                 extract_task.last_summary = f"error={e}"[:160]
-            live.update(_build_table(dashboard_rows, time.time()))
+            _add_result(extract_task.name, extract_task.last_exit, extract_task.last_summary)
+            _plain_print(f"extract_text: {extract_task.last_summary}")
+            _update_live(live_ctx)
 
             # LLM scoring from cached text.
             # Run up to 3 passes if there are still unscored rows.
+            state.phase = "scoring cached (pass 1/3)"
             score_task.last_exit = None
             score_task.last_summary = "scoring"
-            live.update(_build_table(dashboard_rows, time.time()))
+            _update_live(live_ctx)
             if disable_score:
                 score_task.last_exit = 0
                 score_task.last_summary = "skipped (DISABLE_LLM_SCORE=1)"
@@ -498,6 +609,7 @@ Start-Process $Chrome -ArgumentList @(
                 try:
                     from jobscraper.job_scoring_cached import score_unscored_sheet_rows_from_cache
                     from jobscraper.llm_score import DEFAULT_MODEL
+                    from jobscraper.sheets_sync import SheetsConfig
 
                     model = (os.getenv("LLM_MODEL") or "").strip() or DEFAULT_MODEL
                     max_jobs = int((os.getenv("TEXT_FETCH_MAX_JOBS") or "50").strip() or "50")
@@ -508,6 +620,9 @@ Start-Process $Chrome -ArgumentList @(
                     last_missing = None
 
                     for p in range(1, 4):
+                        state.phase = f"scoring cached (pass {p}/3)"
+                        _update_live(live_ctx)
+
                         summary = score_unscored_sheet_rows_from_cache(
                             db_path=Path("data") / "jobs.sqlite3",
                             model=model,
@@ -522,8 +637,12 @@ Start-Process $Chrome -ArgumentList @(
                         total_errors += int(summary.get("errors", 0) or 0)
 
                         missing = int(summary.get("missing", 0) or 0)
+                        state.unscored_remaining = missing
+                        state.score_scored = int(summary.get("scored", 0) or 0)
+                        state.score_target = max_jobs
+
                         score_task.last_summary = f"pass={p}/3 scored={summary['scored']} updated={summary['updated_rows']} missing={missing}"
-                        live.update(_build_table(dashboard_rows, time.time()))
+                        _update_live(live_ctx)
 
                         # Stop early if no missing remain, or if missing is not changing.
                         if missing == 0:
@@ -538,19 +657,22 @@ Start-Process $Chrome -ArgumentList @(
                     score_task.last_exit = 1
                     score_task.last_summary = f"error={e}"[:160]
 
-            live.update(_build_table(dashboard_rows, time.time()))
+            _add_result(score_task.name, score_task.last_exit, score_task.last_summary)
+            _plain_print(f"score_cached: {score_task.last_summary}")
+            _update_live(live_ctx)
 
             # Export all jobs CSV and sync it to All jobs tab.
+            state.phase = "syncing all jobs"
             all_jobs_task.last_exit = None
             all_jobs_task.last_summary = "exporting CSV"
-            live.update(_build_table(dashboard_rows, time.time()))
+            _update_live(live_ctx)
             try:
                 _run(export_cmd, timeout_s=120)
-                from jobscraper.sheets_all_jobs import AllJobsSheetConfig, write_all_jobs_csv_to_sheet
                 from jobscraper.export_all_jobs import ExportConfig
+                from jobscraper.sheets_all_jobs import AllJobsSheetConfig, write_all_jobs_csv_to_sheet
 
                 all_jobs_task.last_summary = f"uploading to sheet tab={all_jobs_tab}"
-                live.update(_build_table(dashboard_rows, time.time()))
+                _update_live(live_ctx)
 
                 csv_path = ExportConfig().out_csv
                 uploaded = write_all_jobs_csv_to_sheet(
@@ -564,16 +686,19 @@ Start-Process $Chrome -ArgumentList @(
                 all_jobs_task.last_exit = 1
                 all_jobs_task.last_summary = f"error={e}"[:160]
                 _append_log(log_csv, [_now().isoformat(timespec="seconds"), "all_jobs_sync", "sync", "1", "0", f"error={e}"])
-            live.update(_build_table(dashboard_rows, time.time()))
+            _add_result(all_jobs_task.name, all_jobs_task.last_exit, all_jobs_task.last_summary)
+            _plain_print(f"all_jobs_sync: {all_jobs_task.last_summary}")
+            _update_live(live_ctx)
 
             # Send ONE pushover notification per cycle.
             # - If we have new relevant jobs: send titles only.
             # - If we have issues (best-effort mode): include a short issues section.
+            state.phase = "sending notifications"
             notify_task.last_exit = 0
             notify_task.last_summary = "no notification"
             if cycle_lines or cycle_issues:
                 notify_task.last_summary = "sending pushover"
-                live.update(_build_table(dashboard_rows, time.time()))
+                _update_live(live_ctx)
 
                 from jobscraper.alerts.pushover import send_summary
 
@@ -607,14 +732,26 @@ Start-Process $Chrome -ArgumentList @(
                 except Exception as e:
                     notify_task.last_exit = 1
                     notify_task.last_summary = f"error={e}"[:160]
-            live.update(_build_table(dashboard_rows, time.time()))
+            _add_result(notify_task.name, notify_task.last_exit, notify_task.last_summary)
+            _plain_print(f"notify: {notify_task.last_summary}")
+            _update_live(live_ctx)
+
+            state.new_relevant = len(cycle_lines)
+            state.issues = len(set(cycle_issues))
 
             # sleep until next cycle
             elapsed = time.time() - cycle_start
+            if once:
+                break
+
             sleep_s = max(1, interval_min * 60 - elapsed)
-            for _ in range(int(sleep_s)):
-                live.update(_build_table(dashboard_rows, time.time()))
+            for sec in range(int(sleep_s)):
+                state.phase = f"sleeping ({_fmt_secs(int(sleep_s - sec))})"
+                _update_live(live_ctx)
                 time.sleep(1)
+    finally:
+        if live_ctx:
+            live_ctx.__exit__(None, None, None)
 
 
 @app.command()
