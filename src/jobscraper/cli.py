@@ -1186,10 +1186,13 @@ def score_open_tabs(
 
     model = model.strip() or (os.getenv("LLM_MODEL") or "").strip() or DEFAULT_MODEL
 
-    # Read sheet and index unscored rows by URL.
+    # Read sheet and index unscored rows by URL (canonicalized).
     sheet_cfg = SheetsConfig(sheet_id=sheet_id, tab=sheet_tab, account=cfg.sheet_account)
     rows = _get_sheet_rows(sheet_cfg)
-    url_to_meta: dict[str, tuple[str, str, str]] = {}
+
+    canon_to_meta: dict[str, tuple[str, str, str]] = {}
+    canon_to_sheet_url: dict[str, str] = {}
+
     for r in (rows or [])[1:]:
         if len(r) < 7:
             continue
@@ -1200,9 +1203,12 @@ def score_open_tabs(
         title = (r[2] or "").strip() if len(r) > 2 else ""
         company = (r[3] or "").strip() if len(r) > 3 else ""
         location = (r[4] or "").strip() if len(r) > 4 else ""
-        url_to_meta[url] = (title, company, location)
 
-    if not url_to_meta:
+        cu = canonicalize_url(url)
+        canon_to_meta[cu] = (title, company, location)
+        canon_to_sheet_url[cu] = url
+
+    if not canon_to_meta:
         console.print("No unscored rows found in sheet.")
         raise typer.Exit(0)
 
@@ -1217,13 +1223,14 @@ def score_open_tabs(
     blocked = 0
 
     for t in open_tabs:
-        if t.url not in url_to_meta:
+        cu = canonicalize_url(t.url)
+        if cu not in canon_to_meta:
             continue
         touched += 1
         if t.status != "ok":
             blocked += 1
         cache_db.upsert(
-            url_canon=canonicalize_url(t.url),
+            url_canon=cu,
             url=t.url,
             text=t.text or "",
             method="cdp-open-tab",
@@ -1238,22 +1245,24 @@ def score_open_tabs(
     # Score the ones that have ok cached text.
     cache_db = JobTextCacheDB(Path("data") / "jobs.sqlite3")
     updates = []
-    for url, (title, company, location) in url_to_meta.items():
-        row = cache_db.get(canonicalize_url(url))
+    for cu, (title, company, location) in canon_to_meta.items():
+        row = cache_db.get(cu)
         if not row or row.get("status") != "ok":
             continue
         text = (row.get("text") or "").strip()
         if len(text) < 200:
             continue
+
+        sheet_url = canon_to_sheet_url.get(cu) or (row.get("url") or "")
         llm = score_job_with_ollama(
             title=title,
             company=company,
             location=location,
-            url=url,
+            url=sheet_url,
             page_text=text,
             model=model,
         )
-        updates.append({"url": url, "score": llm.score, "reasons": (llm.reasons[0] if llm.reasons else "")[:180]})
+        updates.append({"url": sheet_url, "score": llm.score, "reasons": (llm.reasons[0] if llm.reasons else "")[:180]})
 
     cache_db.close()
 
