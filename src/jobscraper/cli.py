@@ -20,6 +20,7 @@ from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
+from rich.console import Group
 
 
 app = typer.Typer(add_completion=False)
@@ -201,7 +202,16 @@ def _init_dashboard_layout(progress: Progress) -> Layout:
     )
     layout["body"].split_row(Layout(name="left"), Layout(name="right"))
 
-    layout["left"].update(Panel(progress, title="Progress", padding=(1, 1)))
+    # Small static ASCII decal, kept stable to avoid any layout reflow/flicker.
+    decal = Text("\n  JobScraper\n  • scrape\n  • extract\n  • score\n", justify="center")
+
+    left_group = Group(
+        progress,
+        Text(""),
+        Panel(decal, border_style="dim", padding=(0, 2)),
+    )
+
+    layout["left"].update(Panel(left_group, title="Progress", padding=(1, 1)))
     layout["right"].update(Panel(Text(""), title="Recent results", padding=(0, 1)))
     layout["header"].update(Panel(Text(""), title="JobScraper", padding=(0, 1)))
     layout["footer"].update(Panel(Text(""), padding=(0, 1)))
