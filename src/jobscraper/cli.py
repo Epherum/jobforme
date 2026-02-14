@@ -526,6 +526,7 @@ def dashboard(
     interval_min = interval_min or cfg.interval_min
 
     effective_cfg = AppConfig(
+        base_dir=cfg.base_dir,
         sheet_id=sheet_id,
         sheet_account=cfg.sheet_account,
         jobs_tab=cfg.jobs_tab,
